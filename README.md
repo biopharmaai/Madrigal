@@ -1,6 +1,7 @@
 <h1 align="center">
   [Madrigal] A Unified Multimodal Model for Predicting Drug Combination Effects
 </h1>
+
 ## 👀 Overview of Madrigal
 
 ## 🚀 Installation
