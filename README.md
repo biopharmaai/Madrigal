@@ -1,3 +1,25 @@
+
+## 👀 Overview of Madrigal
+
+## 🚀 Installation
+
+1⃣️ First, clone the Github repository:
+
+2⃣️ 
+
+3⃣️ Download Datasets
+
+
+### 🛠️ Training and Testing
+
+### 🌟 Personalize based on your own dataset
+
+
+### ⚖️ License
+
+The code in this package is licensed under the MIT License.
+
+</details>
 # Madrigal
 Multimodal drug combination outcome prediction.
 
