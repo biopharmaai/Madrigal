@@ -1,10 +1,10 @@
 <h1 align="center">
-  [Madrigal] A Unified Multimodal Model for Predicting Drug Combination Effects
+  Madrigal: A Unified Multimodal Model for Predicting Drug Combination Effects
 </h1>
 
 ## 👀 Overview of Madrigal
 
-\name is a unified multimodal AI model for predicting drug combinations across clinical outcomes and compounds, including approved drugs and novel compounds in development.
+Madrigal is a unified multimodal AI model for predicting drug combinations across clinical outcomes and compounds, including approved drugs and novel compounds in development.
 
 ## 🚀 Installation
 
