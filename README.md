@@ -4,7 +4,7 @@
 
 ## 👀 Overview of Madrigal
 
-TODO
+\name is a unified multimodal AI model for predicting drug combinations across clinical outcomes and compounds, including approved drugs and novel compounds in development.
 
 ## 🚀 Installation
 
