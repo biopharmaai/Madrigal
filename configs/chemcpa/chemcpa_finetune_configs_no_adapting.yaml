@@ -12,7 +12,7 @@ fixed:
   model.additional_params.doser_type: amortized 
   model.additional_params.multi_task: False  # whether to train on DEG prediction or not
   model.additional_params.seed: 42
-  model.embedding.directory: /n/data1/hms/dbmi/zitnik/lab/users/yeh803/DDI/processed_data/views_features_new/tx/embeddings/
+  model.embedding.directory: views_features_new/tx/embeddings/
   model.embedding.model: rdkit
   model.append_ae_layer: False
   model.use_drugs: false  # whether to encode drugs and use the drug adversary loss or not

@@ -9,8 +9,8 @@ from torch.utils.data import Dataset
 from torch.utils.data import WeightedRandomSampler
 from torch_geometric.data import HeteroData
 from torchdrug.data import PackedMolecule
-from novelddi.utils import CELL_LINES
-from novelddi.data.data_utils import (
+from madrigal.utils import CELL_LINES
+from madrigal.data.data_utils import (
     structured_negative_sampling_multilabel,
     sample_kg_data,
     remove_edges_attached_to_nodes,

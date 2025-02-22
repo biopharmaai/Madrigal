@@ -1,11 +1,8 @@
-*wandb/
-
 *.out
 *.err
 
 *__pycache__/
 
-novelddi/sweep_yaml/
 archive/
 
 *.ipynb_checkpoints/
@@ -14,31 +11,17 @@ archive/
 
 .ipynb_checkpoints/
 
-CASTER/DDE/BIOSNAP/
-CASTER/DDE/models/
-CASTER/demo/
 .DS_Store
 
 notebooks/*.csv
 
-baseline/GMPNN-CS/data/*
-baselines/GMPNN-CS/archived/data/*
-
 *.pth
-*.pt
 *.pkl
 
-
-DrugBank/*
-
-wandb/*
-
-*.sbatch
+wandb/
 
 *.csv
 *.npy
-
-TWOSIDES/*
 
 .env
 tmpwdir/

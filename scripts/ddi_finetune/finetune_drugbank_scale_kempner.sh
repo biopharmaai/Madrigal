@@ -1,21 +1,21 @@
 #!/bin/bash
 #SBATCH -J finetune
-#SBATCH -o /n/home09/yeh803/workspace/NovelDDI/out/%x_%j.out
-#SBATCH -e /n/home09/yeh803/workspace/NovelDDI/out/%x_%j.err
+#SBATCH -o /path/to/Madrigal/out/%x_%j.out
+#SBATCH -e /path/to/Madrigal/out/%x_%j.err
 #SBATCH -c 2
 #SBATCH -t 16:00:00
-#SBATCH --account=kempner_mzitnik_lab -p kempner,kempner_requeue
+#SBATCH --account=xxx 
 #SBATCH --requeue
 #SBATCH --gres=gpu:1
 #SBATCH --mem=16G
 
-base="/n/home09/yeh803/workspace/NovelDDI/"
+base="/path/to/Madrigal"
 split_method="split_by_drugs_targets"
 repeat_num=None
 
 config_file="configs/ddi_finetune/DrugBank/sweep_config_elated_sweep_163.yaml"
-checkpoint="2024-02-06_18:12_helpful-field-81/checkpoint_1000.pt"  # elated-sweep-163 (new corresponding checkpoint)
-full_finetune_mode="str_str+random_sample"  # elated-sweep-163
+checkpoint="checkpoint_1000.pt"
+full_finetune_mode="str_random_sample"
 
 seed=99
 

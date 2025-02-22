@@ -11,10 +11,10 @@ fixed:
   training.run_eval_r2: True
   training.run_eval_logfold: False
   training.save_checkpoints: True                         # checkpoints tend to be ~250MB large for LINCS.
-  training.save_dir: /n/data1/hms/dbmi/zitnik/lab/users/yeh803/DDI/model_output/pretrain/adapting/tx/checkpoints/sweep/
+  training.save_dir: model_output/pretrain/adapting/tx/checkpoints/sweep/
   training.run_name: tx_adapting_full_use_drugs_sweep  # can also be "wo_drug"
   
-  dataset.data_params.dataset_path: /n/data1/hms/dbmi/zitnik/lab/users/yeh803/DDI/processed_data/views_features_new/tx/
+  dataset.data_params.dataset_path: views_features_new/tx/
   dataset.data_params.perturbation_key: canonical_smiles         # stores name of the drug
   dataset.data_params.pert_category: max_dose_averaged_sig_id    # stores smiles_celltype_drugdose
   dataset.data_params.dose_key: pert_dose                      # stores drug dose as a float
@@ -33,7 +33,7 @@ fixed:
   model.additional_params.doser_type: amortized 
   model.additional_params.multi_task: False  # whether to train on DEG prediction or not
   model.additional_params.seed: 42
-  model.embedding.directory: /n/data1/hms/dbmi/zitnik/lab/users/yeh803/DDI/processed_data/views_features_new/tx/embeddings/
+  model.embedding.directory: views_features_new/tx/embeddings/
   model.embedding.model: rdkit
   model.append_ae_layer: False
 

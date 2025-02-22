@@ -6,8 +6,8 @@ from pprint import pprint
 
 from seml.config import generate_configs, read_config
 
-from novelddi.chemcpa.chemCPA.experiments_run import TxAdaptingExperimentWrapper
-from novelddi.utils import PROJECT_DIR
+from madrigal.chemcpa.chemCPA.experiments_run import TxAdaptingExperimentWrapper
+from madrigal.utils import PROJECT_DIR
 
 exp = TxAdaptingExperimentWrapper(init_all=False)
 

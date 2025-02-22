@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from novelddi.models.models import MLPEncoder
+from madrigal.models.models import MLPEncoder
 from torch import nn
 import torch.nn.functional as F
 from tqdm import tqdm

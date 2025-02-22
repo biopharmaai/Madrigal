@@ -1,8 +1,6 @@
 import torch
 import torch.nn as nn
-from novelddi.utils import CELL_LINES  # get_train_masks,
-from novelddi.utils import get_loss_fn
-from novelddi.utils import get_model
+from madrigal.utils import get_loss_fn, get_model, PROJECT_DIR
 from seml.config import generate_configs
 from seml.config import read_config
 
@@ -175,7 +173,7 @@ def get_full_model(args, train_collator, all_kg_data):
     hgt_num_layers = 2
     cv_encoder = "mlp"
     tx_encoder = "chemcpa"
-    tx_chemcpa_config_path = "/home/yeh803/workspace/DDI/NovelDDI/configs/chemcpa/chemcpa_finetune_configs.yaml"
+    tx_chemcpa_config_path = PROJECT_DIR+"configs/chemcpa/chemcpa_finetune_configs.yaml"
 
     fusion = "transformer_uni_proj"
     num_attention_bottlenecks = 2

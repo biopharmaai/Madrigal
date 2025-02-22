@@ -11,12 +11,12 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from novelddi.parse_args import create_parser, get_hparams
-# from novelddi.models.moco import MoCo_NovelDDI
-from novelddi.models.simclr import SimCLR_NovelDDI
-from novelddi.evaluate.evaluate import evaluate_final_embeds, evaluate_pt, stacked_inst_dist_topk_accuracy
-from novelddi.data.data import get_pretrain_data
-from novelddi.utils import (
+from madrigal.parse_args import create_parser, get_hparams
+# from madrigal.models.moco import MoCo_NovelDDI
+from madrigal.models.simclr import SimCLR_NovelDDI
+from madrigal.evaluate.evaluate import evaluate_final_embeds, evaluate_pt, stacked_inst_dist_topk_accuracy
+from madrigal.data.data import get_pretrain_data
+from madrigal.utils import (
     set_seed,
     AverageMeter,
     ProgressMeter,

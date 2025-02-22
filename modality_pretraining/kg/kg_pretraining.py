@@ -2,14 +2,15 @@ from torch_geometric.data import HeteroData
 import torch
 import torch_geometric.transforms as T
 import sys
-sys.path.append('/n/data1/hms/dbmi/zitnik/lab/users/vau974/NovelDDI/')
-from novelddi.models import models
-from novelddi.evaluate import metrics
 from torch import nn
 import copy
 from torch_geometric.utils import negative_sampling
 import torch.nn.functional as F
 import argparse
+
+from madrigal.models import models
+from madrigal.evaluate import metrics
+from madrigal.utils import DATA_DIR
 
 parser = argparse.ArgumentParser(description='KG pretraining')
 parser.add_argument('--hgt_num_layers', type=int, default=2, help='HGT number of layers')
@@ -19,7 +20,7 @@ parser.add_argument('--hgt_group', type=str, default='sum', help='HGT group', ch
 parser.add_argument('--feature_dim', type=int, default=128, help='input feature dimension to transformer (i.e. output feature dimension of view encoders, position embedder and CLS embedder)')
 args = parser.parse_args()
 
-VIEWS_PATH = '/n/data1/hms/dbmi/zitnik/lab/users/yeh803/DDI/processed_data/views_features_new/kg/KG_data_hgt.pt'
+VIEWS_PATH = DATA_DIR+'views_features_new/kg/KG_data_hgt.pt'
 
 graph = torch.load(VIEWS_PATH)
 

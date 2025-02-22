@@ -7,10 +7,10 @@ import numpy as np
 import pandas as pd
 import torch
 import wandb
-from novelddi.evaluate.metrics import get_metrics_binary
-from novelddi.utils import CELL_LINES  # get_train_masks,
-from novelddi.utils import get_model
-from novelddi.utils import to_device
+from madrigal.evaluate.metrics import get_metrics_binary
+from madrigal.utils import CELL_LINES  # get_train_masks,
+from madrigal.utils import get_model
+from madrigal.utils import to_device
 from tqdm import tqdm
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -21,7 +21,8 @@ from data import get_datasets
 from embeddings import get_embeddings_all_ddis, get_embeddings_labels, get_embeddings_labels_batched
 from model import get_full_model
 
-path_base = '/n/data1/hms/dbmi/zitnik/lab/users/yeh803/DDI/processed_data/'
+from madrigal.utils import DATA_DIR, BASE_DIR
+
 kg_encoder = 'hgt'
 data_source = 'DrugBank'
 repeat = None
@@ -46,7 +47,7 @@ def main(args):
 
     if not os.path.exists(args.save_path):
         os.makedirs(args.save_path)
-        if use_wandb:
+        if args.use_wandb:
             save_dir = run.name
             if not os.path.exists(os.path.join(args.save_path, save_dir)):
                 os.makedirs(os.path.join(args.save_path, save_dir))
@@ -69,22 +70,22 @@ def main(args):
         eval_embedding_file = os.path.join(embedding_file, f'eval_label_embeddings.pt')
     
     print(f'Loading data')
-    drug_metadata = pd.read_pickle(os.path.join(path_base, 'views_features_new/combined_metadata_ddi.pkl'))
+    drug_metadata = pd.read_pickle(os.path.join(DATA_DIR, 'views_features_new/combined_metadata_ddi.pkl'))
     drug_metadata['view_str'] = 1  # all drugs must have structure (filtered already during preprocessing)
 
     # load all structure modality data
-    all_molecules = torch.load(os.path.join(path_base, 'views_features_new/str/all_molecules_torchdrug.pt'), map_location='cpu')
+    all_molecules = torch.load(os.path.join(DATA_DIR, 'views_features_new/str/all_molecules_torchdrug.pt'), map_location='cpu')
 
     # load all KG modality data
-    all_kg_data = torch.load(os.path.join(path_base, f'views_features_new/kg/KG_data_{kg_encoder}.pt'), map_location='cpu')
+    all_kg_data = torch.load(os.path.join(DATA_DIR, f'views_features_new/kg/KG_data_{kg_encoder}.pt'), map_location='cpu')
 
     # load perturbation data
-    cv_df = pd.read_csv(path_base + 'views_features_new/cv/cv_cp_data.csv', index_col=0)
-    tx_df = pd.read_csv(path_base + 'views_features_new/tx/tx_cp_data_averaged_intermediate.csv', index_col=0)
+    cv_df = pd.read_csv(DATA_DIR + 'views_features_new/cv/cv_cp_data.csv', index_col=0)
+    tx_df = pd.read_csv(DATA_DIR + 'views_features_new/tx/tx_cp_data_averaged_intermediate.csv', index_col=0)
 
 
     # load label map
-    with open(path_base + f'polypharmacy_new/{data_source}/{data_source.lower()}_ddi_directed_final_label_map.pkl', 'rb') as f:
+    with open(DATA_DIR + f'polypharmacy_new/{data_source}/{data_source.lower()}_ddi_directed_final_label_map.pkl', 'rb') as f:
         label_map = pickle.load(f)
         
     print(f'Loading dataloaders')
@@ -290,14 +291,6 @@ def evaluate(loader, name, model, run, use_wandb, epoch, save_path):
         ddi_pos_neg_samples = eval_batch['edge_indices']['pos_neg']
         embeddings = eval_batch['text_embeddings']
         
-#         sum_masks_head = head_masks_base.shape[0]*head_masks_base.shape[1] - torch.sum(head_masks_base)
-#         if sum_masks_head.item() == head_masks_base.shape[0]:
-#             continue
-        
-#         sum_masks_tail = tail_masks_base.shape[0]*tail_masks_base.shape[1] - torch.sum(tail_masks_base)
-#         if sum_masks_tail.item() == tail_masks_base.shape[0]:
-#             continue
-        
         batch_head = to_device(batch_head, device)
         batch_tail = to_device(batch_tail, device)
         batch_kg = to_device(batch_kg, device)
@@ -342,10 +335,10 @@ if __name__ == "__main__":
     
     parser.add_argument('--num_negative_samples', type=int, default=2)
     parser.add_argument('--lm_model', type=str, default='mistralai/Mistral-7B-v0.1')
-    parser.add_argument('--save_path', type=str, default='/n/data1/hms/dbmi/zitnik/lab/users/vau974/ddi/NovelDDI/LM_decoder/')
+    parser.add_argument('--save_path', type=str, default='./')
     
     parser.add_argument('--use_pretrained', action="store_true", default=True)
-    parser.add_argument('--pretrained_path', type=str, default='/n/data1/hms/dbmi/zitnik/lab/users/yeh803/DDI/model_output/pretrain/DrugBank/split_by_drugs_random/2024-02-06_18:12_helpful-field-81/checkpoint_1000.pt')
+    parser.add_argument('--pretrained_path', type=str, default=BASE_DIR+'model_output/pretrain/DrugBank/split_by_drugs_random/2024-02-06_18:12_helpful-field-81/checkpoint_1000.pt')
 
     parser.add_argument('--lr', type=float, default=2e-5, help='Learning rate for training')
     parser.add_argument('--wd', type=float, default=1e-2, help='Weight decay for training')

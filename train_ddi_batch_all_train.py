@@ -18,13 +18,13 @@ from torch.utils.data import DistributedSampler, DataLoader, RandomSampler, Sequ
 import torch_geometric.transforms as T
 
 ## importing files
-from novelddi.evaluate.metrics import get_metrics
-from novelddi.evaluate.evaluate import evaluate_ft
-from novelddi.evaluate.eval_utils import K, AVERAGE, FINETUNE_MODE_ABLATION_FULL_UNAVAIL_MAP
-from novelddi.evaluate.predict import test
-from novelddi.parse_args import create_parser, get_hparams
-from novelddi.data.data import get_train_data_for_all_train
-from novelddi.utils import (
+from madrigal.evaluate.metrics import get_metrics
+from madrigal.evaluate.evaluate import evaluate_ft
+from madrigal.evaluate.eval_utils import K, AVERAGE, FINETUNE_MODE_ABLATION_FULL_UNAVAIL_MAP
+from madrigal.evaluate.predict import test
+from madrigal.parse_args import create_parser, get_hparams
+from madrigal.data.data import get_train_data_for_all_train
+from madrigal.utils import (
     get_model,
     # get_train_masks,
     get_loss_fn,
