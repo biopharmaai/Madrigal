@@ -304,7 +304,7 @@ def get_tx_encoder(tx_encoder_name, tx_encoder_hparams, embed_dim, use_modality_
                 cov_embeddings_state_dicts,
                 model_config,
                 history,
-            ) = torch.load(ENCODER_CKPT_DIR+f"tx/{pretrained_model_ckpt}", map_location=torch.device('cpu'))  # would be `2023-09-03_09:44_tx_adapting_full_test_not_use_drugs.pt` if using the full model
+            ) = torch.load(ENCODER_CKPT_DIR+f"tx/{pretrained_model_ckpt}", map_location=torch.device('cpu'))
             assert model_config['use_drugs'] == use_drugs, 'Need determine whether to use drug representations or not in chemCPA'
             assert len(cov_embeddings_state_dicts) == 1
             for key in list(state_dict.keys()):

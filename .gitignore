@@ -1,5 +1,6 @@
 *.out
 *.err
+local_only*
 
 *__pycache__/
 

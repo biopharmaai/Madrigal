@@ -644,16 +644,16 @@ def create_optimizer(model, hparams):
     """
     Enable independent learning rates for different parts of the model.
     """
-    from madrigal.models.models import HAN, HGT, RGCN, MLPEncoder, TransformerFusion, PositionEncodingSinusoidal, PositionEncodingLearnable, PositionEncodingRotary, MLPAdaptor, BilinearDDIScorer, NovelDDIEncoder, NovelDDIMultilabel
+    from madrigal.models.models import HAN, HGT, RGCN, MLPEncoder, TransformerFusion, PositionEncodingSinusoidal, PositionEncodingLearnable, MLPAdaptor, BilinearDDIScorer, NovelDDIEncoder, NovelDDIMultilabel
     from madrigal.chemcpa.chemCPA.model import TxAdaptingComPert
     
     decay_params = get_parameter_names(model, [nn.LayerNorm])
     decay_params = [name for name in decay_params if "bias" not in name]
     
-    str_encoder_params = get_parameter_names(model, [HAN, HGT, RGCN, MLPEncoder, TxAdaptingComPert, MLPAdaptor, PositionEncodingSinusoidal, PositionEncodingLearnable, PositionEncodingRotary, TransformerFusion, BilinearDDIScorer])  # Either GIN or GAT
-    kg_encoder_params = get_parameter_names(model, [models.GraphAttentionNetwork, models.GraphIsomorphismNetwork, MLPEncoder, TxAdaptingComPert, MLPAdaptor, PositionEncodingSinusoidal, PositionEncodingLearnable, PositionEncodingRotary, TransformerFusion, BilinearDDIScorer])  # Either HGT, HAN, or RGCN
-    cv_encoders_params = get_parameter_names(model, [HAN, HGT, RGCN, models.GraphAttentionNetwork, models.GraphIsomorphismNetwork, TxAdaptingComPert, MLPAdaptor, PositionEncodingSinusoidal, PositionEncodingLearnable, PositionEncodingRotary, TransformerFusion, BilinearDDIScorer])
-    tx_encoders_params = get_parameter_names(model, [HAN, HGT, RGCN, models.GraphAttentionNetwork, models.GraphIsomorphismNetwork, MLPEncoder, MLPAdaptor, PositionEncodingSinusoidal, PositionEncodingLearnable, PositionEncodingRotary, TransformerFusion, BilinearDDIScorer])
+    str_encoder_params = get_parameter_names(model, [HAN, HGT, RGCN, MLPEncoder, TxAdaptingComPert, MLPAdaptor, PositionEncodingSinusoidal, PositionEncodingLearnable, TransformerFusion, BilinearDDIScorer])  # Either GIN or GAT
+    kg_encoder_params = get_parameter_names(model, [models.GraphAttentionNetwork, models.GraphIsomorphismNetwork, MLPEncoder, TxAdaptingComPert, MLPAdaptor, PositionEncodingSinusoidal, PositionEncodingLearnable, TransformerFusion, BilinearDDIScorer])  # Either HGT, HAN, or RGCN
+    cv_encoders_params = get_parameter_names(model, [HAN, HGT, RGCN, models.GraphAttentionNetwork, models.GraphIsomorphismNetwork, TxAdaptingComPert, MLPAdaptor, PositionEncodingSinusoidal, PositionEncodingLearnable, TransformerFusion, BilinearDDIScorer])
+    tx_encoders_params = get_parameter_names(model, [HAN, HGT, RGCN, models.GraphAttentionNetwork, models.GraphIsomorphismNetwork, MLPEncoder, MLPAdaptor, PositionEncodingSinusoidal, PositionEncodingLearnable, TransformerFusion, BilinearDDIScorer])
     fusion_params = get_parameter_names(model, [HAN, HGT, RGCN, models.GraphAttentionNetwork, models.GraphIsomorphismNetwork, MLPEncoder, TxAdaptingComPert, BilinearDDIScorer])  # MLP, TransformerFusion, PositionEncoding
     fusion_params += list(model._parameters.keys())  # NOTE: Add [CLS] and [TX_BOTTLENECK] into fusion_params
     decoder_params = get_parameter_names(model, [NovelDDIEncoder])  # just the decoder

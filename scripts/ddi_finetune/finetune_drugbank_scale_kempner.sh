@@ -15,7 +15,7 @@ repeat_num=None
 
 config_file="configs/ddi_finetune/DrugBank/sweep_config_elated_sweep_163.yaml"
 checkpoint="checkpoint_1000.pt"
-full_finetune_mode="str_random_sample"
+full_finetune_mode="str_str+random_sample"
 
 seed=99
 
