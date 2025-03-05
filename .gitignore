@@ -14,14 +14,11 @@ archive/
 
 .DS_Store
 
-notebooks/*.csv
-
 *.pth
 *.pkl
 
 wandb/
 
-*.csv
 *.npy
 
 .env

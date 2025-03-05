@@ -1,4 +1,4 @@
-name: primekg
+name: madrigal_env
 channels:
   - pytorch
   - nvidia

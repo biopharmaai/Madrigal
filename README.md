@@ -15,7 +15,7 @@ Madrigal is an open-source model for predicting drug combination outcomes from m
 
 ## 🛠️ Training and Testing
 
-We provide sample model pretraining (second-stage modality alignment) and training scripts in `scripts/`. Specifically, the second-stage pretraining scripts are provided in `./scripts/cl_pretrain/`, and the fine-tuning scripts are provided in `./scripts/ddi_finetune/`. The scripts will need to be adapted according to your machine. 
+We provide sample model pretraining (second-stage modality alignment) and training scripts in `scripts/`. Specifically, the second-stage pretraining scripts are provided in [`./scripts/cl_pretrain/`](https://github.com/mims-harvard/Madrigal/tree/main/scripts/cl_pretrain), and the fine-tuning scripts are provided in [`./scripts/ddi_finetune/`](https://github.com/mims-harvard/Madrigal/tree/main/scripts/ddi_finetune). The scripts will need to be adapted according to your machine. 
 
 The first-stage modality adaptation training scripts (or notebooks) and checkpoints can be found in `modality_pretraining/`. You can also run inference with model checkpoints using sample Jupyter notebooks (to be uploaded).
 
@@ -43,9 +43,9 @@ Currently, modifications of the codebase are required to enable adaptation of th
 ## Detailed instructions
 
 ### Installing `madrigal`
-Before installing `madrigal`, please set up a new conda environment through `mamba env create -f env_new.yaml` (this process might take 1-2 hours; see `mamba` installation guidelines [here](https://mamba.readthedocs.io/en/latest/installation/mamba-installation.html)). By default, our environment is with CUDA 11.7 (gcc 9.2). Please edit `env_new.yaml` accordingly if you are installing in another CUDA version. We welcome contributions of instructions on setting up the environment with other version control managers such as `uv`.
+Before installing `madrigal`, please set up a new conda environment through `mamba env create -f env_new.yaml` (this process should take less than an hour; see `mamba` installation guidelines [here](https://mamba.readthedocs.io/en/latest/installation/mamba-installation.html)). By default, our environment is with CUDA 11.7 (gcc 9.2). Please edit `env_new.yaml` accordingly if you are installing in another CUDA version. We welcome contributions of instructions on setting up the environment with other version control managers such as `uv`.
 
-Then, activate this environment with `mamba activate primekg`. To install a global reference to `madrigal` package in your interpreter (e.g. `from madrigal.X import Y`), run the following:
+Then, activate this environment with `mamba activate madrigal_env`. To install a global reference to `madrigal` package in your interpreter (e.g. `from madrigal.X import Y`), run the following:
 ```
 cd /path/to/Madrigal
 python -m pip install -e .
@@ -93,8 +93,6 @@ ENCODER_CKPT_DIR=/path/to/Madrigal/modality_pretraining/
 CL_CKPT_DIR=/path/to/Madrigal_Data/model_output/pretrain/
 ```
 
-Currently, hard-coded paths to embedding checkpoints exist in the `get_str_encoder, get_kg_encoder, get_cv_encoder, get_tx_encoder` functions in `./madrigal/model/models.py`. Corresponding modality pretrained checkpoints are provided in `./modality_pretraining/`. 
-
 ### ⚖️ License
 
 The code in this package is licensed under the MIT License. 
@@ -104,3 +102,15 @@ The code in this package is licensed under the MIT License.
 2. `torchdrug>=0.2.0.post1` is required, as earlier versions cause an [issue](https://github.com/DeepGraphLearning/torchdrug/issues/148) in LR scheduler.
 3. We use `pytorch=1.13.1`, which requires `cuda<12.0`.
 4. (Updated `env_new.yaml` to resolve this issue.) ~If you encounter `TypeError: canonicalize_version() got an unexpected keyword argument 'strip_trailing_zero'` while installing, please check out [this post](https://github.com/pypa/setuptools/issues/4483). In summary, either `setuptools<71` or `packaging>=22` is required.~
+
+## Citation
+```
+@article{Huang2025.arXiv:2503.02781,
+  author = {Huang, Yepeng and Su, Xiaorui and Ullanat, Varun and Liang, Ivy and Clegg, Lindsay and Olabode, Damilola and Ho, Nicholas and John, Bino and Gibbs, Megan and Zitnik, Marinka},
+  title = {Multimodal AI predicts clinical outcomes of drug combinations from preclinical data},
+  journal = {arXiv preprint arXiv:2503.02781},
+  year = {2025},
+  doi = {10.48550/arXiv.2503.02781},
+  URL = {https://arxiv.org/abs/2503.02781},
+}
+```
