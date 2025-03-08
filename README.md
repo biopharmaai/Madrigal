@@ -4,11 +4,11 @@
 
 ## 👀 Overview of Madrigal
 
-Madrigal is an open-source model for predicting drug combination outcomes from multimodal preclinical data. This repository provides the implementation of the model as described in our [project page](https://zitniklab.hms.harvard.edu/projects/Madrigal/) and our paper. 
+Madrigal is an open-source model for predicting drug combination outcomes from multimodal preclinical data. This repository provides the implementation of the model as described in our [project page](https://zitniklab.hms.harvard.edu/projects/Madrigal/) and our [paper](https://arxiv.org/abs/2503.02781). 
 
 ## 🚀 Preparations
 
-1. First, clone this Github repository and install following the section [below](#installing-madrigal).
+1. Clone this Github repository and install following the section [below](#installing-madrigal).
 2. Set up data directories and create a `.env` file (see [below](#setting-up-data-and-checkpoint-directories)).
 3. [Optional] Download datasets from our data [repo](https://doi.org/10.7910/DVN/ZFTW3J) in Harvard Dataverse and reorganize according to your `.env` setup.
 4. [Optional] Download pretrained checkpoints from our checkpoint [repo](https://huggingface.co/mims-harvard/Madrigal/tree/main) in Huggingface and reorganize according to your `.env` setup.
@@ -45,7 +45,7 @@ Currently, modifications of the codebase are required to enable adaptation of th
 ### Installing `madrigal`
 Before installing `madrigal`, please set up a new conda environment through `mamba env create -f env_new.yaml` (this process should take less than an hour; see `mamba` installation guidelines [here](https://mamba.readthedocs.io/en/latest/installation/mamba-installation.html)). By default, our environment is with CUDA 11.7 (gcc 9.2). Please edit `env_new.yaml` accordingly if you are installing in another CUDA version. We welcome contributions of instructions on setting up the environment with other version control managers such as `uv`.
 
-Then, activate this environment with `mamba activate madrigal_env`. To install a global reference to `madrigal` package in your interpreter (e.g. `from madrigal.X import Y`), run the following:
+Then, activate this environment with `mamba activate primekg`. To install a global reference to `madrigal` package in your interpreter (e.g. `from madrigal.X import Y`), run the following:
 ```
 cd /path/to/Madrigal
 python -m pip install -e .
@@ -63,7 +63,7 @@ Madrigal_Data
 |-- processed_data
 |  |-- polypharmacy_new
 |  |  |-- DrugBank
-|  |  |  |-- split_by_\*
+|  |  |  |-- split_by_*
 |  |  |  |  |-- data tables
 |  |-- views_features_new
 |  |  |-- metadata tables
@@ -78,9 +78,9 @@ Madrigal_Data
 |-- model_output
 |  |-- pretrain
 |  |  |-- DrugBank
-|  |  |  |-- split_by_\*
+|  |  |  |-- split_by_*
 |  |-- DrugBank
-|  |  |-- split_by_\*
+|  |  |-- split_by_*
 ```
 This structure is reflected in the model code. Please make necessary edits if you are using a different organization.
 
@@ -104,6 +104,7 @@ The code in this package is licensed under the MIT License.
 4. (Updated `env_new.yaml` to resolve this issue.) ~If you encounter `TypeError: canonicalize_version() got an unexpected keyword argument 'strip_trailing_zero'` while installing, please check out [this post](https://github.com/pypa/setuptools/issues/4483). In summary, either `setuptools<71` or `packaging>=22` is required.~
 
 ## Citation
+Please find our preprint at https://arxiv.org/abs/2503.02781.
 ```
 @article{Huang2025.arXiv:2503.02781,
   author = {Huang, Yepeng and Su, Xiaorui and Ullanat, Varun and Liang, Ivy and Clegg, Lindsay and Olabode, Damilola and Ho, Nicholas and John, Bino and Gibbs, Megan and Zitnik, Marinka},
