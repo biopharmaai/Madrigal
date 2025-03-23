@@ -454,7 +454,7 @@ def get_all_drugs_data(args, add_specific_drugs=None):
         all_molecules = torch.load(os.path.join(args.path_base, "views_features_new/str/all_molecules_torchdrug.pt"), map_location="cpu")[:args.first_num_drugs]
     else:
         drug_metadata = pd.read_pickle(os.path.join(args.path_base, f"views_features_new/combined_metadata_{add_specific_drugs}.pkl"))
-        assert drug_metadata.shape[0] == args.first_num_drugs
+        assert drug_metadata.shape[0] >= args.first_num_drugs
         drug_metadata = drug_metadata.iloc[:args.first_num_drugs, :]
         all_molecules = torch.load(os.path.join(args.path_base, f"views_features_new/str/{add_specific_drugs}_molecules_torchdrug.pt"), map_location="cpu")[:args.first_num_drugs]
         print(f"Using DrugBank + {add_specific_drugs} metadata")

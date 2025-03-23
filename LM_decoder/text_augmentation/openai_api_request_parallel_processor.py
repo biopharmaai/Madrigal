@@ -18,8 +18,8 @@ Features:
 Example command to call script:
 ```
 python examples/api_request_parallel_processor.py \
-  --requests_filepath examples/data/example_requests_to_parallel_process.jsonl \
-  --save_filepath examples/data/example_requests_to_parallel_process_results.jsonl \
+  --requests_filepath ./api_requests_to_parallel_process.jsonl \
+  --save_filepath ./api_requests_to_parallel_process_results.jsonl \
   --request_url https://api.openai.com/v1/embeddings \
   --max_requests_per_minute 1500 \
   --max_tokens_per_minute 6250000 \
@@ -392,8 +392,8 @@ def task_id_generator_function():
 if __name__ == "__main__":
     # parse command line arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument("--requests_filepath")
-    parser.add_argument("--save_filepath", default=None)
+    parser.add_argument("--requests_filepath", default="./api_requests_to_parallel_process.jsonl")
+    parser.add_argument("--save_filepath", default="./api_requests_to_parallel_process_results.jsonl")
     parser.add_argument("--request_url", default="https://api.openai.com/v1/embeddings")
     parser.add_argument("--api_key", default=os.getenv("OPENAI_API_KEY"))
     parser.add_argument("--max_requests_per_minute", type=int, default=3_000 * 0.5)

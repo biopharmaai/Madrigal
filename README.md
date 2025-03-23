@@ -17,7 +17,9 @@ Madrigal is an open-source model for predicting drug combination outcomes from m
 
 We provide sample model pretraining (second-stage modality alignment) and training scripts in `scripts/`. Specifically, the second-stage pretraining scripts are provided in [`./scripts/cl_pretrain/`](https://github.com/mims-harvard/Madrigal/tree/main/scripts/cl_pretrain), and the fine-tuning scripts are provided in [`./scripts/ddi_finetune/`](https://github.com/mims-harvard/Madrigal/tree/main/scripts/ddi_finetune). The scripts will need to be adapted according to your machine. 
 
-The first-stage modality adaptation training scripts (or notebooks) and checkpoints can be found in `modality_pretraining/`. You can also run inference with model checkpoints using sample Jupyter notebooks (to be uploaded).
+The first-stage modality adaptation training scripts (or notebooks) and checkpoints can be found in `modality_pretraining/`. You can also run inference with model checkpoints using sample Jupyter notebooks:
+- `notebooks/generate_embeddings.ipynb`: Generate embeddings and predictions scores. Also contains scripts to normalize prediction scores so that they can be used for direct comparisons.
+- `notebooks/quick_predictions.ipynb` (to be uploaded): Get normalized ranks for specific queries of [outcome, drug A, drug B]. 
 
 ## 🌟 Personalize based on your own dataset
 
