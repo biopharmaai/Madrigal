@@ -1,8 +1,10 @@
-import pandas as pd
+import os
+from typing import List, Union
 import numpy as np
-import torch, json, wandb
+import torch
+import json
 
-from ..utils import get_activation
+from ..utils import get_activation, BASE_DIR
 from ..models.models import NovelDDIEncoder, NovelDDIMultilabel
 from .evaluate import evaluate_ft
 from .eval_utils import K
@@ -24,7 +26,7 @@ def test(best_epoch, best_within_epoch, test_loaders, loss_fn, task, finetune_mo
     test_metrics = {}
     if split_method in {'split_by_triplets', 'split_by_pairs'}:
         logger.info("Test:")
-        test_key_metric = evaluate_ft(best_model, test_batches[0], loss_fn, k=K, task=task, split='test', finetune_mode=finetune_mode, best_metrics=test_metrics, subgroup=False, verbose=True, device=device, logger=logger, wandb=wandb, save_scores=True, output_dir=output_dir, label_map=label_map)
+        _ = evaluate_ft(best_model, test_batches[0], loss_fn, k=K, task=task, split='test', finetune_mode=finetune_mode, best_metrics=test_metrics, subgroup=False, verbose=True, device=device, logger=logger, wandb=wandb, save_scores=True, output_dir=output_dir, label_map=label_map)
         
     else:
         within_checkpoint = torch.load(output_dir+'best_within_model.pt')
@@ -33,23 +35,62 @@ def test(best_epoch, best_within_epoch, test_loaders, loss_fn, task, finetune_mo
         best_within_model.load_state_dict(within_checkpoint['state_dict'])
         best_within_model.eval()
         
-        if 'easy' in split_method:  # NOTE: the case where val/test drugs are all full modality and we want to evaluate more comprehensively
-            logger.info("Test (between):")
-            test_key_metric = evaluate_ft(best_model, test_batches[0], loss_fn, k=K, task=task, split='test_between_easy', finetune_mode=finetune_mode, best_metrics=test_metrics, subgroup=False, verbose=True, device=device, logger=logger, wandb=wandb, save_scores=True, output_dir=output_dir, label_map=label_map)
+        # if 'easy' in split_method:  # NOTE: the case where val/test drugs are all full modality and we want to evaluate more comprehensively
+        #     logger.info("Test (between):")
+        #     test_key_metric = evaluate_ft(best_model, test_batches[0], loss_fn, k=K, task=task, split='test_between_easy', finetune_mode=finetune_mode, best_metrics=test_metrics, subgroup=False, verbose=True, device=device, logger=logger, wandb=wandb, save_scores=True, output_dir=output_dir, label_map=label_map)
 
-            logger.info("Test (within):")
-            test_within_key_metric = evaluate_ft(best_within_model, test_batches[1], loss_fn, k=K, task=task, split='test_within_easy', finetune_mode=finetune_mode, best_metrics=test_metrics, subgroup=False, verbose=True, device=device, logger=logger, wandb=wandb, save_scores=True, output_dir=output_dir, label_map=label_map)
+        #     logger.info("Test (within):")
+        #     test_within_key_metric = evaluate_ft(best_within_model, test_batches[1], loss_fn, k=K, task=task, split='test_within_easy', finetune_mode=finetune_mode, best_metrics=test_metrics, subgroup=False, verbose=True, device=device, logger=logger, wandb=wandb, save_scores=True, output_dir=output_dir, label_map=label_map)
         
-        else:  # both random and hard drug-splits
-            logger.info("Test (between):")
-            test_key_metric = evaluate_ft(best_model, test_batches[0], loss_fn, k=K, task=task, split='test_between', finetune_mode=finetune_mode, best_metrics=test_metrics, subgroup=False, verbose=True, device=device, logger=logger, wandb=wandb, save_scores=True, output_dir=output_dir, label_map=label_map)
+        # else:  # both random and hard drug-splits
+        logger.info("Test (between):")
+        _ = evaluate_ft(best_model, test_batches[0], loss_fn, k=K, task=task, split='test_between', finetune_mode=finetune_mode, best_metrics=test_metrics, subgroup=False, verbose=True, device=device, logger=logger, wandb=wandb, save_scores=True, output_dir=output_dir, label_map=label_map)
 
-            logger.info("Test (within):")
-            test_within_key_metric = evaluate_ft(best_within_model, test_batches[1], loss_fn, k=K, task=task, split='test_within', finetune_mode=finetune_mode, best_metrics=test_metrics, subgroup=False, verbose=True, device=device, logger=logger, wandb=wandb, save_scores=True, output_dir=output_dir, label_map=label_map)
-            
+        logger.info("Test (within):")
+        _ = evaluate_ft(best_within_model, test_batches[1], loss_fn, k=K, task=task, split='test_within', finetune_mode=finetune_mode, best_metrics=test_metrics, subgroup=False, verbose=True, device=device, logger=logger, wandb=wandb, save_scores=True, output_dir=output_dir, label_map=label_map)
+
+
+def test_all_datasets(test_loaders, loss_fn, task, finetune_mode, output_dir, label_map, device, logger, wandb=None, use_drugbank=False, use_single_drug=True, single_drug_only=False):
+    # NOTE: Work-around for full-batch training
+    test_batches = [next(iter(test_loader)) for test_loader in test_loaders]
+    
+    dataset_sources = ["TWOSIDES"]
+    if use_drugbank:
+        dataset_sources += ["DrugBank"]
+    if use_single_drug:
+        dataset_sources += ["ONSIDES_OFFSIDES_MERGED"]
+    if single_drug_only:
+        dataset_sources = ["ONSIDES_OFFSIDES_MERGED"]
+        if len(test_batches) > 1:
+            test_batches = [test_batches[-1]]
+    if (not use_single_drug) and (not single_drug_only) and len(test_batches) > 2:
+        test_batches = [test_batches[0], test_batches[1]]
+    if (not use_drugbank) and (not single_drug_only) and len(test_batches) > 2:
+        test_batches = [test_batches[0], test_batches[-1]]
+    # NOTE: Cases where we only use one dataset will not call this func
+    
+    for data_source, test_batch in zip(*[
+        dataset_sources,
+        test_batches, 
+    ]):
+        logger.info(f"Testing {data_source} dataset")
+        
+        # first test "test between" or "test" split
+        checkpoint = torch.load(output_dir+f'best_{data_source.lower()}_model.pt')
+        encoder = NovelDDIEncoder(**checkpoint['encoder_configs'])
+        best_model = NovelDDIMultilabel(encoder, **checkpoint['model_configs'])
+        best_model.load_state_dict(checkpoint['state_dict'])
+        best_model.eval()
+        
+        test_metrics = {}
+        if data_source == "ONSIDES_OFFSIDES_MERGED":
+            evaluate_ft(best_model, test_batch, loss_fn, k=K, task=task, split='test', finetune_mode=finetune_mode, best_metrics=test_metrics, subgroup=False, verbose=True, device=device, logger=logger, wandb=wandb, save_scores=False, output_dir=output_dir, label_map=label_map, data_source=data_source+"_")
+        else:
+            evaluate_ft(best_model, test_batch, loss_fn, k=K, task=task, split='test_between', finetune_mode=finetune_mode, best_metrics=test_metrics, subgroup=False, verbose=True, device=device, logger=logger, wandb=wandb, save_scores=False, output_dir=output_dir, label_map=label_map, data_source=data_source+"_")
+
 
 def get_data_for_analysis(data_source: str, kg_encoder: str, split_method: str, repeat: str, path_base: str, checkpoint_dir: str):
-    from madrigal.data.data import get_train_data
+    from ..data.data import get_train_data
 
     checkpoint = checkpoint_dir + 'best_model.pt'
     class Args:
@@ -76,9 +117,8 @@ def get_data_for_analysis(data_source: str, kg_encoder: str, split_method: str, 
     return train_batch, val_batches, test_batches, label_map
 
 
-# TODO: Merge this with the above function
-def get_data_for_analysis_copy(data_source: str, kg_encoder: str, split_method: str, repeat: str, path_base: str, checkpoint: str, first_num_drugs: int, add_specific_drugs: str = None):
-    from madrigal.data.data import get_all_drugs_data
+def get_data_for_analysis_all_drugs(data_source: str, kg_encoder: str, split_method: str, repeat: str, path_base: str, checkpoint: str, first_num_drugs: int, add_specific_drugs: str = None):
+    from ..data.data import get_all_drugs_data
     assert first_num_drugs is not None
     class Args:
         def __init__(self):
@@ -104,7 +144,7 @@ def get_data_for_analysis_copy(data_source: str, kg_encoder: str, split_method: 
     
 
 def get_data_for_analysis_all_train(data_source: str, kg_encoder: str, split_method: str, repeat: str, path_base: str, ckpt: str):
-    from madrigal.data.data import get_train_data_for_all_train
+    from ..data.data import get_train_data_for_all_train
 
     assert split_method == "split_by_pairs"
     class Args:
@@ -130,8 +170,7 @@ def get_data_for_analysis_all_train(data_source: str, kg_encoder: str, split_met
 
 
 @torch.no_grad()
-def make_predictions(ckpt_or_checkpoint_dir: str, batch: dict, eval_type: str, finetune_mode: str, device: torch.device):
-    from madrigal.models.models import NovelDDIEncoder, NovelDDIMultilabel
+def make_predictions(ckpt_or_checkpoint_dir: str, batch: dict, eval_type: str, finetune_mode: str, device: torch.device, force_ori_modalities: bool = False, return_all_pairwise: bool = False):
     from madrigal.utils import to_device
     from madrigal.evaluate.eval_utils import get_evaluate_masks
 
@@ -139,8 +178,34 @@ def make_predictions(ckpt_or_checkpoint_dir: str, batch: dict, eval_type: str, f
         checkpoint = torch.load(ckpt_or_checkpoint_dir, map_location=device)
     else:
         checkpoint = torch.load(ckpt_or_checkpoint_dir + "best_model.pt", map_location=device)
-    encoder = NovelDDIEncoder(**checkpoint['encoder_configs'])
-    model = NovelDDIMultilabel(encoder, **checkpoint['model_configs'])
+        
+    if force_ori_modalities:
+        assert "tab_mod_encoder_hparams_dict" not in checkpoint["encoder_configs"].keys() or len(checkpoint["encoder_configs"]["tab_mod_encoder_hparams_dict"]) == 1  # only str, kg, cv; no bs
+        import madrigal.utils as utils_module  # Import the entire module
+
+        # Save the original value
+        original_value = utils_module.NUM_NON_TX_MODALITIES
+        
+        try:
+            # Temporarily modify the attribute directly
+            utils_module.NUM_NON_TX_MODALITIES = 3
+            print(f"Modified NUM_NON_TX_MODALITIES to {utils_module.NUM_NON_TX_MODALITIES}")
+            
+            # Create model with modified value
+            encoder = NovelDDIEncoder(**checkpoint['encoder_configs'])
+            model = NovelDDIMultilabel(encoder, **checkpoint['model_configs'])
+            incomp_keys = model.load_state_dict(checkpoint['state_dict'], strict=False)
+        finally:
+            # Restore the original value
+            utils_module.NUM_NON_TX_MODALITIES = original_value
+            print(f"Restored NUM_NON_TX_MODALITIES to {utils_module.NUM_NON_TX_MODALITIES}")
+            
+    else:
+        encoder = NovelDDIEncoder(**checkpoint['encoder_configs'])
+        model = NovelDDIMultilabel(encoder, **checkpoint['model_configs'])
+    
+    # encoder = NovelDDIEncoder(**checkpoint['encoder_configs'])
+    # model = NovelDDIMultilabel(encoder, **checkpoint['model_configs'])
     incomp_keys = model.load_state_dict(checkpoint['state_dict'], strict=False)
     incomp_keys_info = {
         "Missing keys": incomp_keys.missing_keys,
@@ -160,19 +225,28 @@ def make_predictions(ckpt_or_checkpoint_dir: str, batch: dict, eval_type: str, f
     ddi_tail_indices = batch['edge_indices']['tail']
     ddi_labels = batch['edge_indices']['label']
     
+    if force_ori_modalities:
+        if "bs" in batch['head'].keys():
+            del batch['head']["bs"]
+        if "bs" in batch['tail'].keys():
+            del batch['tail']["bs"]
+    
     masks_head, masks_tail = get_evaluate_masks(head_masks_base, tail_masks_base, eval_type, finetune_mode, device)
     pred_ddis = torch.sigmoid(model(batch_head, batch_tail, to_device(masks_head, device), to_device(masks_tail, device), batch_kg)).detach().cpu()
-    pred_ddis = pred_ddis[ddi_labels, ddi_head_indices, ddi_tail_indices]  # in place to reduce GPU memory cost
     
+    if return_all_pairwise:
+        return pred_ddis
+    
+    pred_ddis = pred_ddis[ddi_labels, ddi_head_indices, ddi_tail_indices]
     return pred_ddis
 
 
 # TODO: Merge this with the above function
 @torch.no_grad()
 def make_predictions_copy(checkpoint_dir: str, batch: dict, eval_type: str, finetune_mode: str, device: torch.device):
-    from madrigal.models.models import NovelDDIEncoder, NovelDDIMultilabel
-    from madrigal.utils import to_device
-    from madrigal.evaluate.eval_utils import get_evaluate_masks
+    from ..models.models import NovelDDIEncoder, NovelDDIMultilabel
+    from ..utils import to_device
+    from ..evaluate.eval_utils import get_evaluate_masks
 
     checkpoint = torch.load(checkpoint_dir + 'best_model.pt', map_location=device)
     encoder = NovelDDIEncoder(**checkpoint['encoder_configs'])
@@ -197,14 +271,14 @@ def make_predictions_copy(checkpoint_dir: str, batch: dict, eval_type: str, fine
     return pred_ddis
 
 
-def get_drug_specific_scores(checkpoint_dir, batch, eval_type, finetune_mode, device, mode='test_between'):
+def get_drug_specific_scores(checkpoint_dir, batch, eval_type, finetune_mode, device, mode='test_between', force_ori_modalities=False):
     ddi_head_indices = batch['edge_indices']['head']
     ddi_tail_indices = batch['edge_indices']['tail']
     ddi_labels = batch['edge_indices']['label']
     ddi_pos_neg_samples = batch['edge_indices']['pos_neg'].float()
     true_ddis = ddi_pos_neg_samples
     
-    pred_ddis = make_predictions(checkpoint_dir, batch, eval_type, finetune_mode, device)
+    pred_ddis = make_predictions(checkpoint_dir, batch, eval_type, finetune_mode, device, force_ori_modalities=force_ori_modalities)
 
     ddi_head_indices_pos = ddi_head_indices[true_ddis.bool()]
     ddi_tail_indices_pos = ddi_tail_indices[true_ddis.bool()]
@@ -212,8 +286,8 @@ def get_drug_specific_scores(checkpoint_dir, batch, eval_type, finetune_mode, de
     ddi_labels_pos = ddi_labels[true_ddis.bool()]
     true_ddis_pos = true_ddis[true_ddis.bool()]
 
-    ddi_head_indices_neg = ddi_head_indices[~true_ddis.bool()]
-    ddi_tail_indices_neg = ddi_tail_indices[~true_ddis.bool()]
+    _ = ddi_head_indices[~true_ddis.bool()]  # ddi_head_indices_neg
+    _ = ddi_tail_indices[~true_ddis.bool()]  # ddi_tail_indices_neg
     pred_ddis_neg = pred_ddis[~true_ddis.bool()]
     ddi_labels_neg = ddi_labels[~true_ddis.bool()]
     true_ddis_neg = true_ddis[~true_ddis.bool()]
@@ -276,6 +350,268 @@ def get_drug_specific_scores(checkpoint_dir, batch, eval_type, finetune_mode, de
             all_metrics.setdefault(metric_name, []).append(metric)
             
     return all_metrics, drugs_of_interest
+
+
+###########
+# Get combo prediction scores
+###########
+def sigmoid(x: np.ndarray):
+    return 1 / (1 + np.exp(-x))
+
+
+# def get_onsides_single_scores(drug_metadata: pd.DataFrame, onsides_offsides_scores_dict: Dict[str, Any], outcome_twosides_inds: np.ndarray, outcome_twosides_names: np.ndarray, drug_inds: Union[np.ndarray, List], drug_names: Union[np.ndarray, List]) -> pd.DataFrame:
+#     """ Get predictions scores with the ONSIDES_OFFSIDES model for each outcome for a batch of drugs
+#     """
+#     outcome_in_onsides_indicator = np.isin(outcome_twosides_inds, onsides_offsides_scores_dict[list(onsides_offsides_scores_dict.keys())[0]].columns)
+#     outcome_twosides_inds_in_onsides = outcome_twosides_inds[outcome_in_onsides_indicator]
+#     outcome_twosides_names_in_onsides = outcome_twosides_names[outcome_in_onsides_indicator]
+#     single_scores = pd.concat([
+#         pd.concat([preds.loc[drug_ind, outcome_twosides_inds_in_onsides] for preds in onsides_offsides_scores_dict.values()], axis=1).mean(1)
+#         for drug_ind in drug_inds
+#     ], axis=1)
+#     single_scores.index = pd.Index(outcome_twosides_names_in_onsides)
+#     single_scores.columns = drug_names
+#     single_scores = pd.concat([
+#         single_scores,
+#         drug_metadata.loc[drug_inds, ["node_name"]].T.rename(columns=dict(zip(drug_inds, drug_names)))
+#     ], axis=0).rename(index={"node_name":"drug"})
+#     return single_scores, outcome_twosides_inds_in_onsides, outcome_twosides_names_in_onsides
+
+
+def get_twosides_scores_for_all_pairs_among_drugs(twosides_ddi_classes, drug_indices: Union[List[int], np.ndarray], checkpoint_dir: str, drug_group_str: str = "selected", epoch: int = None, eval_type: str = "full_full", device: str = "cuda", all_outcomes: bool = True, outcome_twosides_inds = None):
+    """ Interface for generating TWOSIDES predictions for all pairs between a batch of drugs across outcomes, given embeddings
+    """
+    import pickle
+    device = torch.device(device)
+    if epoch is None:
+        checkpoint = torch.load(checkpoint_dir + "best_model.pt", map_location="cpu")
+        epoch = checkpoint["epoch"]
+        flag = True
+    else:
+        checkpoint = torch.load(checkpoint_dir + f"checkpoint_{epoch}.pt", map_location="cpu")
+        flag = False
+
+    # if os.path.exists(f"{checkpoint_dir}/{eval_type}_all_outcomes_{drug_group_str}_drugs_raw_scores_{epoch}.npy"):
+    #     return np.load(f"{checkpoint_dir}/{eval_type}_all_outcomes_{drug_group_str}_drugs_raw_scores_{epoch}.npy", mmap_mode="r")
+    
+    # checkpoint['encoder_configs']['pos_emb_type'] = 'sinusoidal'
+    encoder = NovelDDIEncoder(**checkpoint['encoder_configs'])
+    model = NovelDDIMultilabel(encoder, **checkpoint['model_configs'])
+    model.load_state_dict(checkpoint['state_dict'])
+    model.eval()
+    model.to(device)
+
+    if not flag:
+        z_full = torch.load(f"{checkpoint_dir}/all_drug_embeddings_full_{epoch}.pt").to(device)
+    else:
+        z_full = torch.load(f"{checkpoint_dir}/twosides_all_metadata_drug_embeddings_full.pt").to(device)  # NOTE: This is to be compatible with the old version
+    assert max(drug_indices) < z_full.shape[0]
+    z_full_selected = z_full[drug_indices, :]
+
+    if all_outcomes:
+        fp = np.memmap(
+            f"{checkpoint_dir}/{eval_type}_all_outcomes_{drug_group_str}_drugs_raw_scores_{epoch}.raw", 
+            dtype=np.float32, mode="w+", shape=(
+                len(twosides_ddi_classes), z_full_selected.shape[0], z_full_selected.shape[0]
+            )
+        )
+        
+        # start_idx = 0
+        for start, end in zip(
+            np.arange(0, len(twosides_ddi_classes), 10), 
+            np.arange(0, len(twosides_ddi_classes), 10)[1:].tolist() + \
+            [len(twosides_ddi_classes)]
+        ):
+            # print(start)
+            label_range = (start, end)
+            with torch.no_grad():
+                pred_scores = model.decoder(z_full_selected, z_full_selected, label_range).detach().cpu().numpy()
+            fp[start:end, :, :] = pred_scores
+        
+        # NOTE: Cannot directly save a memmap with np.save
+        with open(f"{checkpoint_dir}/{eval_type}_all_outcomes_{drug_group_str}_drugs_raw_scores_{epoch}.npy", "wb") as f:
+            np.save(f, fp)
+        
+        fp.flush()
+        out = np.load(f"{checkpoint_dir}/{eval_type}_all_outcomes_{drug_group_str}_drugs_raw_scores_{epoch}.npy", mmap_mode="r")
+         
+    else:
+        fp = np.memmap(
+            f"{checkpoint_dir}/{eval_type}_selected_outcomes_{drug_group_str}_drugs_raw_scores_{epoch}.raw", 
+            dtype=np.float32, mode="w+", shape=(
+                len(outcome_twosides_inds), z_full_selected.shape[0], z_full_selected.shape[0]
+            )
+        )
+        
+        # start_idx = 0
+        for i, start in enumerate(outcome_twosides_inds):
+            # print(start)
+            label_range = (start, start+1)
+            with torch.no_grad():
+                pred_scores = model.decoder(z_full_selected, z_full_selected, label_range).detach().cpu().numpy()
+            fp[i:i+1, :, :] = pred_scores
+        
+        # NOTE: Cannot directly save a memmap with np.save
+        with open(f"{checkpoint_dir}/{eval_type}_selected_outcomes_{drug_group_str}_drugs_raw_scores_{epoch}.npy", "wb") as f:
+            np.save(f, fp)
+        
+        fp.flush()
+        out = np.load(f"{checkpoint_dir}/{eval_type}_selected_outcomes_{drug_group_str}_drugs_raw_scores_{epoch}.npy", mmap_mode="r")
+        
+    pickle.dump(drug_indices, open(f"{checkpoint_dir}/{drug_group_str}_drugs.pkl", "wb"))
+    
+    return out
+
+
+def get_twosides_scores_wrapper(outcome_twosides_inds, drug_inds, drug_group_str, twosides_ddi_classes, ckpt_list, all_outcomes=True, split_method="split_by_pairs", eval_type="full_full"):
+    data_source = 'TWOSIDES'
+    # repeat = None
+
+    combo_twosides_scores_dict = {}
+    for epoch in [200, 700]:  # TWOSIDES (split-by-pairs)
+    # for epoch in [None]:
+        combo_twosides_scores_dict[epoch] = {}
+        for checkpoint in ckpt_list:
+            checkpoint_dir = BASE_DIR + f'model_output/{data_source}/{split_method}/{checkpoint}/'
+            combo_twosides_scores = get_twosides_scores_for_all_pairs_among_drugs(
+                twosides_ddi_classes = twosides_ddi_classes,
+                drug_indices = drug_inds, 
+                checkpoint_dir = checkpoint_dir, 
+                drug_group_str = drug_group_str, 
+                epoch = epoch, 
+                eval_type = eval_type, 
+                device = "cuda",
+                all_outcomes = all_outcomes,
+                outcome_twosides_inds = outcome_twosides_inds,
+            )
+            combo_twosides_scores_dict[epoch][checkpoint] = combo_twosides_scores
+    
+    if all_outcomes:
+        from copy import deepcopy 
+        temp = deepcopy(combo_twosides_scores_dict)
+        for epoch in list(combo_twosides_scores_dict.keys()):
+            combo_twosides_scores_dict[epoch] = sigmoid(np.stack(list(combo_twosides_scores_dict[epoch].values()), axis=0)[:, outcome_twosides_inds, :, :]).mean(0)
+            temp[epoch] = sigmoid(np.stack(list(temp[epoch].values()), axis=0)).mean(0)
+        return combo_twosides_scores_dict, temp
+    else:
+        for epoch in list(combo_twosides_scores_dict.keys()):
+            combo_twosides_scores_dict[epoch] = sigmoid(np.stack(list(combo_twosides_scores_dict[epoch].values()), axis=0)).mean(0)
+        return combo_twosides_scores_dict
+
+
+def get_drugbank_scores_for_all_pairs_among_drugs(drugbank_ddi_classes, drug_indices: Union[List[int], np.ndarray], checkpoint_dir: str, drug_group_str: str = "selected", epoch: int = None, eval_type: str = "full_full", device: str = "cuda", all_outcomes: bool = True, outcome_drugbank_inds = None):
+    """ Interface for generating DrugBank predictions for all pairs between a batch of drugs across outcomes, given embeddings
+    """
+    import pickle
+    device = torch.device(device)
+    if epoch is None:
+        checkpoint = torch.load(checkpoint_dir + "best_model.pt", map_location="cpu")
+        epoch = checkpoint["epoch"]
+    else:
+        checkpoint = torch.load(checkpoint_dir + f"checkpoint_{epoch}.pt", map_location="cpu")
+
+    # if os.path.exists(f"{checkpoint_dir}/{eval_type}_all_outcomes_{drug_group_str}_drugs_raw_scores_{epoch}.npy"):
+    #     return np.load(f"{checkpoint_dir}/{eval_type}_all_outcomes_{drug_group_str}_drugs_raw_scores_{epoch}.npy", mmap_mode="r")
+    
+    # checkpoint['encoder_configs']['pos_emb_type'] = 'sinusoidal'
+    encoder = NovelDDIEncoder(**checkpoint['encoder_configs'])
+    model = NovelDDIMultilabel(encoder, **checkpoint['model_configs'])
+    model.load_state_dict(checkpoint['state_dict'])
+    model.eval()
+    model.to(device)
+
+    z_full = torch.load(f"{checkpoint_dir}/drugbank_all_metadata_drug_embeddings_full.pt").to(device)
+    assert max(drug_indices) < z_full.shape[0]
+    z_full_selected = z_full[drug_indices, :]
+
+    if all_outcomes:
+        fp = np.memmap(
+            f"{checkpoint_dir}/{eval_type}_all_outcomes_{drug_group_str}_drugs_raw_scores_{epoch}.raw", 
+            dtype=np.float32, mode="w+", shape=(
+                len(drugbank_ddi_classes), z_full_selected.shape[0], z_full_selected.shape[0]
+            )
+        )
+        
+        # start_idx = 0
+        for start, end in zip(
+            np.arange(0, len(drugbank_ddi_classes), 10), 
+            np.arange(0, len(drugbank_ddi_classes), 10)[1:].tolist() + \
+            [len(drugbank_ddi_classes)]
+        ):
+            # print(start)
+            label_range = (start, end)
+            with torch.no_grad():
+                pred_scores = model.decoder(z_full_selected, z_full_selected, label_range).detach().cpu().numpy()
+            fp[start:end, :, :] = pred_scores
+        
+        # NOTE: Cannot directly save a memmap with np.save
+        with open(f"{checkpoint_dir}/{eval_type}_all_outcomes_{drug_group_str}_drugs_raw_scores_{epoch}.npy", "wb") as f:
+            np.save(f, fp)
+        
+        fp.flush()
+        out = np.load(f"{checkpoint_dir}/{eval_type}_all_outcomes_{drug_group_str}_drugs_raw_scores_{epoch}.npy", mmap_mode="r")
+         
+    else:
+        fp = np.memmap(
+            f"{checkpoint_dir}/{eval_type}_selected_outcomes_{drug_group_str}_drugs_raw_scores_{epoch}.raw", 
+            dtype=np.float32, mode="w+", shape=(
+                len(outcome_drugbank_inds), z_full_selected.shape[0], z_full_selected.shape[0]
+            )
+        )
+        
+        # start_idx = 0
+        for i, start in enumerate(outcome_drugbank_inds):
+            # print(start)
+            label_range = (start, start+1)
+            with torch.no_grad():
+                pred_scores = model.decoder(z_full_selected, z_full_selected, label_range).detach().cpu().numpy()
+            fp[i:i+1, :, :] = pred_scores
+        
+        # NOTE: Cannot directly save a memmap with np.save
+        with open(f"{checkpoint_dir}/{eval_type}_selected_outcomes_{drug_group_str}_drugs_raw_scores_{epoch}.npy", "wb") as f:
+            np.save(f, fp)
+        
+        fp.flush()
+        out = np.load(f"{checkpoint_dir}/{eval_type}_selected_outcomes_{drug_group_str}_drugs_raw_scores_{epoch}.npy", mmap_mode="r")
+        
+    pickle.dump(drug_indices, open(f"{checkpoint_dir}/{drug_group_str}_drugs.pkl", "wb"))
+    
+    return out
+
+
+def get_drugbank_scores_wrapper(outcome_drugbank_inds, drug_inds, ckpt_list, drug_2_inds=None, drugbank_ddi_classes=None, drug_group_str: str = "selected"):
+    data_source = 'DrugBank'
+    split_method = 'split_by_pairs'
+    # repeat = None
+    epoch = 700
+    eval_type = "full_full"
+
+    combo_drugbank_scores_dict = {}
+
+    for checkpoint in ckpt_list: 
+        checkpoint_dir = BASE_DIR + f'model_output/{data_source}/{split_method}/{checkpoint}/'
+        if os.path.exists(checkpoint_dir + f"{eval_type}_all_ddi_{data_source}_drugs_raw_scores_{epoch}.npy"):
+            combo_drugbank_scores = np.load(checkpoint_dir + f"{eval_type}_all_ddi_{data_source}_drugs_raw_scores_{epoch}.npy", mmap_mode="r")[:, drug_inds, :]
+            if drug_2_inds is not None:
+                combo_drugbank_scores = combo_drugbank_scores[:, :, drug_2_inds]
+            else:
+                combo_drugbank_scores = combo_drugbank_scores[:, :, drug_inds]
+        else:
+            combo_drugbank_scores = get_drugbank_scores_for_all_pairs_among_drugs(
+                drugbank_ddi_classes = drugbank_ddi_classes,
+                drug_indices = drug_inds, 
+                checkpoint_dir = checkpoint_dir, 
+                drug_group_str = drug_group_str, 
+                epoch = epoch, 
+                eval_type = eval_type, 
+                device = "cuda",
+                outcome_drugbank_inds = outcome_drugbank_inds,
+            )
+        combo_drugbank_scores_dict[checkpoint] = combo_drugbank_scores
+    
+    combo_drugbank_scores = sigmoid(np.stack(list(combo_drugbank_scores_dict.values()), axis=0)[:, outcome_drugbank_inds, :, :]).mean(0)
+    
+    return combo_drugbank_scores
 
 
 @torch.no_grad()

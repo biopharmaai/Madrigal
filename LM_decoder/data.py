@@ -39,18 +39,16 @@ class BatchedDDIDataset(Dataset):
     Long so that each row is a pair of drug indices.
     """
 
-    def __init__(self, split, paraphrase, use_label, embedding_file):
+    def __init__(self, split, paraphrase, use_label, embedding_dir, embedding_file):
         
         self.paraphrase = paraphrase
         
+        df = pd.read_csv(f"{embedding_dir}/{split}_df.csv")
         if paraphrase:
-            df = pd.read_csv(f"paraphrased_dataset_new/{split}_df.csv")
             self.descriptions = [df[f"descriptions_{i}"].values for i in range(10)]
         elif use_label:
-            df = pd.read_csv(f"label_dataset/{split}_df.csv")
             self.descriptions = df["label_descriptions"].values            
         else:
-            df = pd.read_csv(f"dataset/{split}_df.csv")
             self.descriptions = df["descriptions"].values
             
         if paraphrase:
@@ -314,12 +312,12 @@ class BatchedDDIDataCollator:
         }
 
 
-def get_datasets(paraphrase, use_label, train_embedding_file, eval_embedding_file):
+def get_datasets(paraphrase, use_label, embedding_dir, train_embedding_file, eval_embedding_file):
     """
     Get datasets for DDI training
     """
-    train_dataset = BatchedDDIDataset("train", paraphrase, use_label, train_embedding_file)
-    eval_dataset = BatchedDDIDataset("eval", paraphrase, use_label, eval_embedding_file)
+    train_dataset = BatchedDDIDataset("train", paraphrase, use_label, embedding_dir, train_embedding_file)
+    eval_dataset = BatchedDDIDataset("eval", paraphrase, use_label, embedding_dir, eval_embedding_file)
 
     return train_dataset, eval_dataset
 

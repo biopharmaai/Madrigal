@@ -13,6 +13,6 @@ CHECKPOINT_DIR = PROJECT_DIR / "checkpoints"
 FIGURE_DIR = PROJECT_DIR / "figures"
 
 TX_DATA_DIR = BASE_DIR + "raw_data/transcriptomics_signature/"
-KG_DATA_DIR = BASE_DIR + "PrimeKG/"
+KG_DATA_DIR = BASE_DIR + "raw_data/PrimeKG/"
 OUTPUT_DIR = DATA_DIR
 VIEW_OUTPUT_DIR = OUTPUT_DIR + "views_features_new/"

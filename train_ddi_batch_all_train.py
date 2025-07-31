@@ -1,32 +1,24 @@
-from typing import Tuple, Union
-import os, random, json, gc
+import os
+import gc
 from datetime import datetime
-import pandas as pd
-import numpy as np
-from tqdm import tqdm
-from copy import deepcopy
 
 # os.environ["CUDA_LAUNCH_BLOCKING"]="1"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:2048"
 
-import torch, wandb
+import torch
+import wandb
 import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import DistributedSampler, DataLoader, RandomSampler, SequentialSampler
 # import torch.multiprocessing as mp
 # from torch.distributed import init_process_group, get_rank, get_world_size
-import torch_geometric.transforms as T
 
 ## importing files
 from madrigal.evaluate.metrics import get_metrics
-from madrigal.evaluate.evaluate import evaluate_ft
 from madrigal.evaluate.eval_utils import K, AVERAGE, FINETUNE_MODE_ABLATION_FULL_UNAVAIL_MAP
-from madrigal.evaluate.predict import test
 from madrigal.parse_args import create_parser, get_hparams
 from madrigal.data.data import get_train_data_for_all_train
 from madrigal.utils import (
+    NON_TX_MODALITIES,
     get_model,
-    # get_train_masks,
     get_loss_fn,
     create_optimizer,
     to_device,
@@ -47,7 +39,7 @@ SEED = 42
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def train(train_loader, task, all_kg_data, num_labels, num_epochs, loss_fn_name, feature_dim, str_encoder, str_encoder_hparams, str_node_feat_dim, kg_encoder, kg_encoder_hparams, cv_encoder, cv_encoder_hparams, tx_encoder, tx_encoder_hparams, transformer_fusion_hparams, proj_hparams, hparams, save_dir, finetune_mode, device, logger, frozen=False):
+def train(train_loader, task, all_kg_data, num_labels, num_epochs, loss_fn_name, feature_dim, str_encoder, str_encoder_hparams, str_node_feat_dim, kg_encoder, kg_encoder_hparams, cv_encoder, cv_encoder_hparams, tx_encoder, tx_encoder_hparams, transformer_fusion_hparams, proj_hparams, hparams, save_dir, finetune_mode, device, logger, frozen=False, tab_mod_encoder_hparams_dict=None):
     """ Main training function
     """
     model, encoder_configs, model_configs = get_model(
@@ -80,6 +72,7 @@ def train(train_loader, task, all_kg_data, num_labels, num_epochs, loss_fn_name,
         use_modality_pretrain=hparams["use_modality_pretrain"],
         adapt_before_fusion=hparams["adapt_before_fusion"],
         use_pretrained_adaptor=hparams["use_pretrained_adaptor"],
+        tab_mod_encoder_hparams_dict=tab_mod_encoder_hparams_dict,
     )
     
     if hparams["checkpoint"] is not None:
@@ -194,7 +187,6 @@ def train(train_loader, task, all_kg_data, num_labels, num_epochs, loss_fn_name,
         head_all_subset_masks = [torch.stack([from_indices_to_tensor(list(indices), head_masks_base.shape[1]) for indices in list(powerset(torch.where(mask==0)[0].tolist()))[1:] if 0 in indices]) for mask in head_masks_base.int()]  # generate only subset masks that contain structure modality
     
     elif finetune_mode in {"str_random_sample", "double_random"}:  # NOTE: "str_random_sample" will be used as str-str (directed) + str-random (undirected) + random-random (directed); while "double_random" will be random-random (undirected)
-        # NOTE: 
         head_all_subset_masks = [torch.stack([from_indices_to_tensor(list(indices), head_masks_base.shape[1]) for indices in list(powerset(torch.where(mask==0)[0].tolist()))[1:]]) for mask in head_masks_base.int()]
         
     elif finetune_mode in {
@@ -241,9 +233,8 @@ def train(train_loader, task, all_kg_data, num_labels, num_epochs, loss_fn_name,
         elif finetune_mode in {"full_full", "ablation_str_str", "ablation_kg_kg_subset"} or "padded" in finetune_mode:
             masks_X = head_masks_base
         
-        # Start real training
+        # Start training
         model.train()
-        assert model.encoder.use_tx_basal == False  # TODO: remove this line after debugging
         batch_head = to_device(batch_head, device)
         batch_tail = to_device(batch_tail, device)
         batch_kg = to_device(batch_kg, device)
@@ -333,8 +324,6 @@ def train(train_loader, task, all_kg_data, num_labels, num_epochs, loss_fn_name,
         if epoch % hparams["evaluate_interval"] == 0:
             torch.cuda.empty_cache()
             gc.collect()
-            print(f"{(torch.cuda.memory_allocated()/1024/1024/1024):.4f}")
-            print(f"{(torch.cuda.memory_cached()/1024/1024/1024):.4f}")
             
             model.eval()
             logger.info("Computing train metrics:")
@@ -403,7 +392,10 @@ def main():
     # Collate hidden dims for structural encoder. Same should be done for Cv/Ts MLPs, maybe wrap in a function
     str_encoder_hparams = get_str_encoder_hparams(args, hparams)
     kg_encoder_hparams = get_kg_encoder_hparams(args, hparams)  # hparams["han_att_heads"], hparams["han_hidden_dim"]
-    cv_encoder_hparams = get_cv_encoder_hparams(args, hparams, train_collator.cv_df.shape[0])
+    cv_encoder_hparams = get_cv_encoder_hparams(args, hparams, train_collator.tabular_mod_dfs["cv"].shape[0])
+    tab_mod_encoder_hparams_dict = {}
+    for mod in NON_TX_MODALITIES[2:]:
+        tab_mod_encoder_hparams_dict[mod] = get_cv_encoder_hparams(args, hparams, train_collator.tabular_mod_dfs[mod].shape[0])
     tx_encoder_hparams = get_tx_encoder_hparams(args, hparams, train_collator.tx_df.shape[0])
     proj_hparams = get_proj_hparams(hparams)
     transformer_fusion_hparams = get_transformer_fusion_hparams(args, hparams)
@@ -433,6 +425,7 @@ def main():
         device, 
         logger, 
         args.frozen, 
+        tab_mod_encoder_hparams_dict,
     )
         
         

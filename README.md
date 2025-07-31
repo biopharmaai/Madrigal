@@ -18,8 +18,30 @@ Madrigal is an open-source model for predicting drug combination outcomes from m
 We provide sample model pretraining (second-stage modality alignment) and training scripts in `scripts/`. Specifically, the second-stage pretraining scripts are provided in [`./scripts/cl_pretrain/`](https://github.com/mims-harvard/Madrigal/tree/main/scripts/cl_pretrain), and the fine-tuning scripts are provided in [`./scripts/ddi_finetune/`](https://github.com/mims-harvard/Madrigal/tree/main/scripts/ddi_finetune). The scripts will need to be adapted according to your machine. 
 
 The first-stage modality adaptation training scripts (or notebooks) and checkpoints can be found in `modality_pretraining/`. You can also run inference with model checkpoints using sample Jupyter notebooks:
-- `notebooks/generate_embeddings.ipynb`: Generate embeddings and predictions scores. Also contains scripts to normalize prediction scores so that they can be used for direct comparisons.
-- `notebooks/quick_predictions.ipynb` (to be uploaded): Get normalized ranks for specific queries of [outcome, drug A, drug B]. 
+- [generate_embeddings](https://github.com/mims-harvard/Madrigal/blob/main/notebooks/generate_embeddings.ipynb): Generate embeddings and raw scores. Also contains scripts to normalize prediction scores so that they can be used for direct comparisons.
+- [quick_predictions](https://github.com/mims-harvard/Madrigal/blob/main/notebooks/quick_predictions.ipynb): Get raw scores and normalized ranks for specific queries of [outcome, drug A, drug B]. 
+
+## Notebooks
+| Notebook | Content | Requirement |
+|-|-|-|
+| [fig1_pretrained_embeds](https://github.com/mims-harvard/Madrigal/blob/main/notebooks/fig1/fig1_pretrained_embeds.ipynb) | Plot UMAP of pretrained modality embeddings (Fig. 1d) | Harvard Dataverse, Huggingface |
+| [fig2_model_analyses](https://github.com/mims-harvard/Madrigal/blob/main/notebooks/fig2/fig2_model_analyses.ipynb) | Performance change with drug similarity (Fig. 2c,d) | Harvard Dataverse, Huggingface |
+| [fig2_modality_ablations](https://github.com/mims-harvard/Madrigal/blob/main/notebooks/fig2/fig2_modality_ablations.ipynb) | Outcome-specific AUPRC of Madrigal and ablation models (Fig. 2e) | Harvard Dataverse, Huggingface |
+| [fig3_self_combo](https://github.com/mims-harvard/Madrigal/blob/main/notebooks/fig3/fig3_self_combo.ipynb) | External validation with FDA safety rankings (Fig. 3a-c) | Harvard Dataverse, Huggingface |
+| [fig3_transporter_mediated_ddis](https://github.com/mims-harvard/Madrigal/blob/main/notebooks/fig3/fig3_transporter_mediated_ddis.ipynb) | Transporter-mediated DDIs (Fig. 3d-f) | Harvard Dataverse, Huggingface, Normalized rank |
+| [fig4_clinical_trials_combos](https://github.com/mims-harvard/Madrigal/blob/main/notebooks/fig4/fig4_clinical_trials_combos.ipynb) | Evaluation with clinical trials data (Fig. 4b) | Harvard Dataverse, Huggingface, ToolUniverse |
+| [fig4_parpi](https://github.com/mims-harvard/Madrigal/blob/main/notebooks/fig4/fig4_clinical_trials_combos.ipynb) | Evaluation with PARPi combinations (Fig. 4c) | Harvard Dataverse, Huggingface, Normalized rank |
+| [fig5_t2d_mash](https://github.com/mims-harvard/Madrigal/blob/main/notebooks/fig5/fig5_t2d_mash.ipynb) | Evaluation with combinations in metabolic disorders (Fig. 5) | Harvard Dataverse, Huggingface, Normalized rank |
+| [fig6_PDX](https://github.com/mims-harvard/Madrigal/blob/main/notebooks/fig6/fig6_PDX.ipynb) | Individualized predictions with PDXE (Fig. 6c-f) | Harvard Dataverse, Huggingface |
+| [fig6_clinical_validation_dfci](https://github.com/mims-harvard/Madrigal/blob/main/notebooks/fig6/fig6_clinical_validation_dfci.ipynb) | Analyses with DFCI cohort (Fig. 6j) | Harvard Dataverse, Huggingface; (access to patient data is restricted) |
+| [discussions_proteomics_analysis](https://github.com/mims-harvard/Madrigal/blob/main/notebooks/discussions/discussions_proteomics_analysis.ipynb) | Correlation with proteomics data | Harvard Dataverse, Huggingface |
+| [discussions_combomatch](https://github.com/mims-harvard/Madrigal/blob/main/notebooks/discussions/discussions_combomatch.ipynb) | Inference on ComboMATCH drug pairs | Harvard Dataverse, Huggingface, Normalized rank |
+
+Requirements:
+- [Harvard Dataverse](https://doi.org/10.7910/DVN/ZFTW3J): Required for running all notebooks.
+- [Huggingface](https://huggingface.co/mims-harvard/Madrigal/tree/main): Required for running all notebooks.
+- [Normalized rank](https://drive.google.com/file/d/1wvgM5-VoVmnK8C8ixTkcCQwWVZwyf9dS/view?usp=sharing): The full normalized rank tensor (80GB) used in some notebooks. 
+- [ToolUniverse](https://github.com/mims-harvard/ToolUniverse): Used to extract clinical trials adverse events data.
 
 ## 🌟 Personalize based on your own dataset
 
@@ -45,7 +67,7 @@ Currently, modifications of the codebase are required to enable adaptation of th
 ## Detailed instructions
 
 ### Installing `madrigal`
-Before installing `madrigal`, please set up a new conda environment through `mamba env create -f env_new.yaml` (this process should take less than an hour; see `mamba` installation guidelines [here](https://mamba.readthedocs.io/en/latest/installation/mamba-installation.html)). By default, our environment is with CUDA 11.7 (gcc 9.2). Please edit `env_new.yaml` accordingly if you are installing in another CUDA version. We welcome contributions of instructions on setting up the environment with other version control managers such as `uv`.
+Before installing `madrigal`, please set up a new conda environment through `mamba env create -f env_new.yaml` (this process should take less than an hour; see `mamba` installation guidelines [here](https://mamba.readthedocs.io/en/latest/installation/mamba-installation.html)). By default, our environment is with CUDA 11.7 + gcc 9.2. Please edit `env_new.yaml` accordingly if you are installing in another CUDA version. We welcome contributions of instructions on setting up the environment with other version control managers such as `uv`.
 
 Then, activate this environment with `mamba activate primekg`. To install a global reference to `madrigal` package in your interpreter (e.g. `from madrigal.X import Y`), run the following:
 ```
@@ -61,13 +83,13 @@ Now you should be able to use `import madrigal` from anywhere on your system, as
 ### Setting up data and checkpoint directories
 We organize our data and model output folders in the following way:
 ```
-Madrigal_Data
+Madrigal_Data (BASE_DIR)
 |-- processed_data
-|  |-- polypharmacy_new
+|  |-- polypharmacy_new (in Harvard Dataverse)
 |  |  |-- DrugBank
 |  |  |  |-- split_by_*
 |  |  |  |  |-- data tables
-|  |-- views_features_new
+|  |-- views_features_new (in Harvard Dataverse)
 |  |  |-- metadata tables
 |  |  |-- str
 |  |  |  |-- torchdrug-generated molecular graphs
@@ -78,11 +100,12 @@ Madrigal_Data
 |  |  |-- tx
 |  |  |  |-- transcriptomics tables
 |-- model_output
-|  |-- pretrain
+|  |-- pretrain (in Huggingface)
 |  |  |-- DrugBank
 |  |  |  |-- split_by_*
-|  |-- DrugBank
+|  |-- DrugBank (in Huggingface)
 |  |  |-- split_by_*
+|-- raw_data (data used in analyses, in Harvard Dataverse)
 ```
 This structure is reflected in the model code. Please make necessary edits if you are using a different organization.
 
@@ -102,8 +125,9 @@ The code in this package is licensed under the MIT License.
 ## Known issues
 1. The `torchdrug` module needs to be imported after importing `torch_geometric` modules.
 2. `torchdrug>=0.2.0.post1` is required, as earlier versions cause an [issue](https://github.com/DeepGraphLearning/torchdrug/issues/148) in LR scheduler.
-3. We use `pytorch=1.13.1`, which requires `cuda<12.0`.
-4. (Updated `env_new.yaml` to resolve this issue.) ~If you encounter `TypeError: canonicalize_version() got an unexpected keyword argument 'strip_trailing_zero'` while installing, please check out [this post](https://github.com/pypa/setuptools/issues/4483). In summary, either `setuptools<71` or `packaging>=22` is required.~
+3. We use `pytorch=1.13.1`, which requires `cuda<12.0`. 
+  - If you have only `cuda>12.0`, our incomplete test indicates that `pytorch=2.1.0` with `pytorch-geometric<2.4.0` might be compatible (CUDA 12.8 + gcc 14.2 + PyTorch 2.1.0). 
+4. (Updated `env_new.yaml` to resolve this issue.) ~If you encounter `TypeError: canonicalize_version() got an unexpected keyword argument 'strip_trailing_zero'` while installing, please check out [this post](https://github.com/pypa/setuptools/issues/4483). In summary, either `setuptools<71` or `packaging>=22` is required.
 
 ## Citation
 Please find our preprint at https://arxiv.org/abs/2503.02781.

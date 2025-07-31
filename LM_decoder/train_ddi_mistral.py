@@ -8,17 +8,13 @@ import pandas as pd
 import torch
 import wandb
 from madrigal.evaluate.metrics import get_metrics_binary
-from madrigal.utils import CELL_LINES  # get_train_masks,
-from madrigal.utils import get_model
 from madrigal.utils import to_device
 from tqdm import tqdm
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
-from data import get_collators
-from data import get_dataloaders
-from data import get_datasets
-from embeddings import get_embeddings_all_ddis, get_embeddings_labels, get_embeddings_labels_batched
+from data import get_collators, get_dataloaders, get_datasets
+from embeddings import get_embeddings_labels, get_embeddings_labels_batched
 from model import get_full_model
 
 from madrigal.utils import DATA_DIR, BASE_DIR
@@ -33,7 +29,6 @@ device = 'cuda'
 
 
 def main(args):
-    
     project_name = f'lm_{data_source}_{args.split_method}_{repeat}'
     if args.use_wandb:
         run = wandb.init(
@@ -54,20 +49,20 @@ def main(args):
         
     if args.generate_embeddings:
         if args.paraphrase:
-            embedding_file = get_embeddings_labels_batched(args.lm_model, args.paraphrase, args.use_label, args.save_path)
+            embedding_dir = get_embeddings_labels_batched(args.lm_model, args.paraphrase, args.use_label, args.save_path)
         else:
-            embedding_file = get_embeddings_labels(args.lm_model, args.paraphrase, args.use_label, args.save_path)
+            embedding_dir = get_embeddings_labels(args.lm_model, args.paraphrase, args.use_label, args.save_path)
     else:
-        embedding_file = args.embeddings_file
+        embedding_dir = args.embeddings_file
     
     print(f'Loading embedding file')
     
     if args.paraphrase:
-        train_embedding_file = os.path.join(embedding_file, f'train_descriptions_0_embeddings.pt')
-        eval_embedding_file = os.path.join(embedding_file, f'eval_descriptions_0_embeddings.pt')
+        train_embedding_file = os.path.join(embedding_dir, f'train_descriptions_0_embeddings.pt')
+        eval_embedding_file = os.path.join(embedding_dir, f'eval_descriptions_0_embeddings.pt')
     else:
-        train_embedding_file = os.path.join(embedding_file, f'train_label_embeddings.pt')
-        eval_embedding_file = os.path.join(embedding_file, f'eval_label_embeddings.pt')
+        train_embedding_file = os.path.join(embedding_dir, f'train_label_embeddings.pt')
+        eval_embedding_file = os.path.join(embedding_dir, f'eval_label_embeddings.pt')
     
     print(f'Loading data')
     drug_metadata = pd.read_pickle(os.path.join(DATA_DIR, 'views_features_new/combined_metadata_ddi.pkl'))
@@ -92,6 +87,7 @@ def main(args):
     # load datasets
     train_dataset, eval_dataset = get_datasets(args.paraphrase,
                                                args.use_label,
+                                               embedding_dir,
                                                train_embedding_file, 
                                                eval_embedding_file)
 
@@ -108,7 +104,6 @@ def main(args):
     
     
 def trainer(args, train_loader, eval_loader, model, loss_fn, optimizer, run):
-            
     num_epochs = args.num_train_epochs
     if args.use_wandb:
         wandb.watch(model, log="all", log_freq=1000)
@@ -198,8 +193,6 @@ def trainer(args, train_loader, eval_loader, model, loss_fn, optimizer, run):
     
 @torch.no_grad()
 def evaluate_paraphrased(loader, name, model, run, use_wandb, epoch, save_path, eval_all=True):
-    
-    
     if use_wandb:
         save_dir = run.name
     elif not use_wandb or save_dir == '':
@@ -338,7 +331,7 @@ if __name__ == "__main__":
     parser.add_argument('--save_path', type=str, default='./')
     
     parser.add_argument('--use_pretrained', action="store_true", default=True)
-    parser.add_argument('--pretrained_path', type=str, default=BASE_DIR+'model_output/pretrain/DrugBank/split_by_drugs_random/2024-02-06_18:12_helpful-field-81/checkpoint_1000.pt')
+    parser.add_argument('--pretrained_path', type=str, default='checkpoint_1000.pt')
 
     parser.add_argument('--lr', type=float, default=2e-5, help='Learning rate for training')
     parser.add_argument('--wd', type=float, default=1e-2, help='Weight decay for training')

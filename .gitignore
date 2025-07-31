@@ -15,16 +15,17 @@ archive/
 .DS_Store
 
 *.pth
-*.pkl
+# *.pkl
 
 wandb/
 
 *.npy
+*.svg
 
 .env
 tmpwdir/
 
 temp/
 notebooks/figs/
-notebooks/archived/test/
+notebooks/archived/
 

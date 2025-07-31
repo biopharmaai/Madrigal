@@ -12,7 +12,7 @@ def create_parser(stage: str):
     parser.add_argument('--data_source', type=str, default='TWOSIDES', help='DDI data source', choices=['ONSIDES', 'TWOSIDES', 'DrugBank'])
     parser.add_argument('--save_dir', type=str, default=None, help='Directory to save the best model and results')
     parser.add_argument('--path_base', type=str, default=None, help='Data directory')
-    parser.add_argument('--split_method', type=str, default='split_by_triplets', choices=['split_by_drugs_random', 'split_by_drugs_atc', 'split_by_drugs_targets', 'split_by_drugs_taxonomy', 'split_by_pairs', 'split_by_triplets'])
+    parser.add_argument('--split_method', type=str, default='split_by_triplets', choices=['split_by_drugs_random', 'split_by_drugs_atc', 'split_by_drugs_targets', 'split_by_drugs_taxonomy', 'split_by_pairs', 'split_by_triplets', "split_by_drugs_twosides_matched_random"])
     parser.add_argument('--feature_dim', type=int, default=128, help='input feature dimension to transformer (i.e. output feature dimension of view encoders, position embedder, tx bottlenecks, and CLS embedder)')
     parser.add_argument('--use_modality_pretrain', action='store_true', help='whether to use first stage pretraining')
     parser.add_argument('--seed', type=int, default=None, help='random seed')
@@ -161,6 +161,11 @@ def create_parser(stage: str):
         parser.add_argument('--train_with_str_str', action='store_true', help='whether to train with str-str pairs')
         parser.add_argument('--adapt_before_fusion', action='store_true', help='whether to adapt the view embeddings before fusion')
         parser.add_argument('--use_pretrained_adaptor', action='store_true', help='whether to use pretrain adaptor for adaptation of modality encodings before fusion')
+        
+        parser.add_argument("--dataset_ratio", type=str, default="1_1_1", help="dataset ratio for TWOSIDES, DrugBank, and ONSIDES_OFFSIDES")
+        parser.add_argument("--use_drugbank", action='store_true', help="whether to use DrugBank dataset")
+        parser.add_argument("--use_single_drug", action='store_true', help="whether to use ONSIDES-OFFISDES dataset")
+        parser.add_argument("--loss_ratio_single_drug", type=float, default=10., help="loss ratio for single drug")
 
         args = parser.parse_args()
         args = process_args(args, 'train')
@@ -310,6 +315,11 @@ def get_hparams(args, stage):
             'train_with_str_str': args.train_with_str_str,
             'adapt_before_fusion': args.adapt_before_fusion,
             'use_pretrained_adaptor': args.use_pretrained_adaptor,
+            
+            "dataset_ratio": args.dataset_ratio,
+            "use_drugbank": args.use_drugbank,
+            "use_single_drug": args.use_single_drug,
+            "loss_ratio_single_drug": args.loss_ratio_single_drug,
         })
 
     elif stage=='pretrain':

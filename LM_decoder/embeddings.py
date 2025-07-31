@@ -10,6 +10,9 @@ from transformers import AutoModel
 from transformers import AutoTokenizer
 
 
+device = "cuda"
+
+
 class LM(nn.Module):
     def __init__(self, decoder, lm_model):
         super(LM, self).__init__()
@@ -53,9 +56,6 @@ def collate_fn(batch, tokenizer):
 
 
 def get_embeddings_labels_batched(lm_model, paraphrase, use_label, base_path):
-
-    device = "cuda"
-
     print("\nLoading tokenizer")
     tokenizer = AutoTokenizer.from_pretrained(lm_model)
     if lm_model == "mistralai/Mistral-7B-v0.1":
@@ -112,9 +112,6 @@ def get_embeddings_labels_batched(lm_model, paraphrase, use_label, base_path):
 
 
 def get_embeddings_labels(lm_model, paraphrase, use_label, base_path):
-
-    device = "cuda"
-
     print("\nLoading tokenizer")
     tokenizer = AutoTokenizer.from_pretrained(lm_model)
     if lm_model == "mistralai/Mistral-7B-v0.1":
@@ -183,9 +180,6 @@ def get_embeddings_labels(lm_model, paraphrase, use_label, base_path):
 
 
 def get_embeddings_all_ddis(lm_model, paraphrase, batch_size, base_path):
-
-    device = "cuda"
-
     print("\nLoading tokenizer")
     tokenizer = AutoTokenizer.from_pretrained(lm_model)
     if lm_model == "mistralai/Mistral-7B-v0.1":
@@ -215,14 +209,14 @@ def get_embeddings_all_ddis(lm_model, paraphrase, batch_size, base_path):
             dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=False
         )
 
-        for batch in tqdm(loader):
+        for i, batch in enumerate(loader):
             batch = batch.to(device)
             with torch.no_grad():
                 example_outputs = model(batch)
 
             torch.save(
                 example_outputs.cpu(),
-                os.path.join(base_path, split, f"embeddings_{start//batch_size}.pt"),
+                os.path.join(base_path, split, f"embeddings_{i//batch_size}.pt"),
             )
 
     return os.path.join(base_path, "train"), os.path.join(base_path, "eval")
