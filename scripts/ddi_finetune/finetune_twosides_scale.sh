@@ -4,8 +4,7 @@
 #SBATCH -e /path/to/Madrigal/out/%x_%j.err
 #SBATCH -c 2
 #SBATCH -t 16:00:00
-#SBATCH -p gpu_quad,gpu_requeue
-#SBATCH --qos=gpuquad_qos
+#SBATCH -p gpu_quad
 #SBATCH --requeue
 #SBATCH --gres=gpu:a100:1
 #SBATCH --mem=16G

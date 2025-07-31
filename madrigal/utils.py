@@ -1,23 +1,22 @@
-import os, shutil, logging, random, math
+import os
+import shutil
+import logging
+import random
+import math
 from dotenv import load_dotenv
 import numpy as np
-import pandas as pd
-from typing import Dict, Iterable, List, Union
+from typing import Iterable, Union
 from itertools import chain, combinations
 
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import _LRScheduler
-from torch.optim.lr_scheduler import CosineAnnealingLR
+# from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch_geometric.data import HeteroData, Data
 from torchdrug import models
 from torchdrug.data import PackedMolecule
 
 from .chemcpa.chemcpa_config_utils import generate_configs, read_config
-
-import plotly.express as px
-from umap import UMAP
 
 import torch.multiprocessing
 torch.multiprocessing.set_sharing_strategy('file_system')
@@ -28,16 +27,22 @@ MOL_DIM = 67  # NOTE: torchdrug default
 MAX_DRUGS = 25000
 CELL_LINES = ['a375', 'a549', 'asc', 'ha1e', 'hcc515', 'hec108', 'hela', 'hepg2', 'ht29', 'huvec', 'mcf7', 'npc', 'pc3', 'thp1', 'vcap', 'yapc']  # NOTE: This list is ORDERED
 CELL_LINES_CAPITALIZED = [cell_line.upper() for cell_line in CELL_LINES]
-NUM_NON_TX_MODALITIES = 3  # str, kg, cv
+NON_TX_MODALITIES = os.getenv("NON_TX_MODALITIES")
+if NON_TX_MODALITIES is not None:
+    NON_TX_MODALITIES = NON_TX_MODALITIES.split("_")  # ["str", "kg", "cv", "bs" (or "bs2")] 
+else:
+    NON_TX_MODALITIES = ["str", "kg", "cv"] 
+print(NON_TX_MODALITIES)
+NUM_NON_TX_MODALITIES = len(NON_TX_MODALITIES)
 NUM_MODALITIES = NUM_NON_TX_MODALITIES + len(CELL_LINES)
 
 
 load_dotenv()
-PROJECT_DIR = os.getenv("PROJECT_DIR")
-DATA_DIR = os.getenv("DATA_DIR")
-BASE_DIR = os.getenv("BASE_DIR")
-ENCODER_CKPT_DIR = os.getenv("ENCODER_CKPT_DIR")
-CL_CKPT_DIR = os.getenv("CL_CKPT_DIR")
+PROJECT_DIR = os.getenv("PROJECT_DIR", "")
+DATA_DIR = os.getenv("DATA_DIR", "")
+BASE_DIR = os.getenv("BASE_DIR", "")
+ENCODER_CKPT_DIR = os.getenv("ENCODER_CKPT_DIR", "")
+CL_CKPT_DIR = os.getenv("CL_CKPT_DIR", "")
 
 
 ######
@@ -54,7 +59,8 @@ def get_pretrain_masks(drugs, masks, pretrain_mode, pretrain_unbalanced, pretrai
         mod_probs = (1 / (1 - masks).sum(axis=0))
         assert pretrain_tx_downsample_ratio <= 1
         mod_probs[-len(CELL_LINES):] = pretrain_tx_downsample_ratio * mod_probs[-len(CELL_LINES):]
-        mod_probs =  np.array(mod_probs / mod_probs.sum())
+        mod_probs = np.array(mod_probs / mod_probs.sum())
+        mod_probs = np.clip(mod_probs, 1e-6, 1.0)  # avoid zero probs
     
     # get all possible subset masks for all samples
     if pretrain_mode == 'double_random' or pretrain_mode == 'str_kg':
@@ -81,7 +87,7 @@ def get_pretrain_masks(drugs, masks, pretrain_mode, pretrain_unbalanced, pretrai
             # P({m1, ..., not n1, ...}) = P(m1) * ... * (1-P(n1)) * ... * (#all choose #m)
             subset_probs = []
             for subset in all_subsets:
-                subset_probs.append(np.concatenate([mod_probs[np.where(subset==0)[0]], (1-mod_probs)[np.where(subset==1)[0]]]).prod() * math.comb((1-mask).sum(), (1-subset).sum()))
+                subset_probs.append(np.concatenate([mod_probs[np.where(subset==0)[0]], (1-mod_probs)[np.where(subset==1)[0]]]).prod() * math.comb((1-mask).sum(), (1-subset).sum())) # type: ignore
             subset_probs = np.array(subset_probs) / sum(subset_probs)
             
             unique_subset_masks[tuple(mask)] = (all_subsets, subset_probs)
@@ -103,7 +109,7 @@ def get_pretrain_masks(drugs, masks, pretrain_mode, pretrain_unbalanced, pretrai
             # for each of the subset, get the (unnormalized) probability of it getting sampled
             subset_probs = []
             for subset in all_subsets:
-                subset_probs.extend(mod_probs[np.where(subset==0)[0]])  # because each time we only sample one modality
+                subset_probs.extend(mod_probs[np.where(subset==0)[0]])  # type: ignore # because each time we only sample one modality
             subset_probs = np.array(subset_probs) / sum(subset_probs)
             
             unique_subset_masks[tuple(mask)] = (all_subsets, subset_probs)
@@ -126,7 +132,7 @@ def get_pretrain_masks(drugs, masks, pretrain_mode, pretrain_unbalanced, pretrai
             # for each of the subset, get the probability of it getting sampled
             subset_probs = []
             for subset in all_subsets:
-                subset_probs.append(np.concatenate([mod_probs[np.where(subset==0)[0]], (1-mod_probs)[np.where(subset==1)[0]]]).prod())
+                subset_probs.append(np.concatenate([mod_probs[np.where(subset==0)[0]], (1-mod_probs)[np.where(subset==1)[0]]]).prod()) # type: ignore
             subset_probs = np.array(subset_probs) / sum(subset_probs)
             
             unique_subset_masks[tuple(mask)] = (all_subsets, subset_probs)
@@ -179,8 +185,11 @@ def get_model(
     use_tx_basal=False,
     adapt_before_fusion=False,
     use_pretrained_adaptor=False,
+    use_single_drug=False,
+    prediction_dim_single_drug=None,
+    tab_mod_encoder_hparams_dict=None,
 ):
-    from madrigal.models.models import NovelDDIEncoder, NovelDDIMultilabel
+    from .models.models import NovelDDIEncoder, NovelDDIMultilabel
     
     # encoder
     if checkpoint_path is None:
@@ -206,6 +215,7 @@ def get_model(
             pos_emb_type=pos_emb_type,
             use_tx_basal=use_tx_basal,
             adapt_before_fusion=adapt_before_fusion,
+            tab_mod_encoder_hparams_dict=tab_mod_encoder_hparams_dict,
         )
         
         # encoder configs
@@ -230,6 +240,7 @@ def get_model(
             'use_modality_pretrain': use_modality_pretrain,
             'normalize': normalize,
             'adapt_before_fusion': adapt_before_fusion,
+            "tab_mod_encoder_hparams_dict": tab_mod_encoder_hparams_dict,
         }
         
     else:
@@ -243,6 +254,9 @@ def get_model(
             checkpoint = torch.load(full_ckpt_path, map_location="cpu")
             encoder_configs = checkpoint['encoder_configs']
             state_dict = checkpoint['state_dict']
+            
+            print(full_ckpt_path)
+            # assert ("tab_mod_encoder_hparams_dict" in encoder_configs.keys()) or ("2024" in checkpoint_path)  # DEBUG
             
             # replace the hyperparameters other than encoder-related ones in encoder_configs with the desired ones
             # assert (not use_tx_basal)
@@ -258,7 +272,8 @@ def get_model(
             encoder = NovelDDIEncoder(**encoder_configs)
             
             if 'epoch' in checkpoint.keys():
-                start_epoch = checkpoint['epoch']
+                # start_epoch = checkpoint['epoch']
+                pass
             
             # process state_dict
             # if finetune_mode is not None and 'ablation' in finetune_mode:  # NOTE: pe should be re-initialized in the ablation models
@@ -304,7 +319,9 @@ def get_model(
         encoder, 
         feat_dim=feature_dim, 
         prediction_dim=prediction_dim, 
+        prediction_dim_single_drug=prediction_dim_single_drug,
         normalize=decoder_normalize,
+        use_single_drug=use_single_drug,
     )
     if device is not None:
         model = model.to(device)  # TODO: deal with DDP case
@@ -318,145 +335,11 @@ def get_model(
         'feat_dim': feature_dim, 
         'prediction_dim': prediction_dim, 
         'normalize': normalize,
+        "use_single_drug": use_single_drug,
     }
     
     return model, encoder_configs, model_configs
     
-
-####
-# Plotting utils
-####
-@torch.no_grad()
-def draw_umap_plot(embeds, encoder, drug_ids, drug_loader, masks, collator, plotname, wandb, device, logger, epoch, output_dir=None, other_labels=None, raw_encoder_output=False):
-    str_mod_ind = 0
-    kg_mod_ind = 1
-    cv_mod_ind = 2
-    tx_mcf7_mod_ind = 13
-    tx_pc3_mod_ind = 15
-    tx_vcap_mod_ind = 17
-    
-    if embeds is not None:
-        str_embedding = embeds[str(str_mod_ind)]
-        kg_embedding = embeds[str(kg_mod_ind)]
-        cv_embedding = embeds[str(cv_mod_ind)]
-        tx_mcf7_embedding = embeds[str(tx_mcf7_mod_ind)]  # TODO: Find a better way to do this...
-        tx_pc3_embedding = embeds[str(tx_pc3_mod_ind)]
-        tx_vcap_embedding = embeds[str(tx_vcap_mod_ind)]
-        if drug_ids is not None:
-            drug_ids = drug_ids[str(str_mod_ind)] + drug_ids[str(kg_mod_ind)] + drug_ids[str(cv_mod_ind)] + drug_ids[str(tx_mcf7_mod_ind)] + drug_ids[str(tx_pc3_mod_ind)] + drug_ids[str(tx_vcap_mod_ind)]
-    
-    elif drug_ids is not None:
-        if isinstance(drug_ids, list):
-            drug_ids = np.array(drug_ids)
-        
-        masks = masks[drug_ids]
-        _, modality_data = to_device(collator([drug_ids]), device)
-        mols, kgs, cvs, tx_all_cell_lines = modality_data
-        assert drug_ids.shape[0] == masks.shape[0]
-        mod_avail = 1 - masks
-        
-        keep_str_mask = torch.ones(masks.shape[1])
-        keep_str_mask[str_mod_ind] = 0
-        keep_str_mask = to_device(keep_str_mask.repeat(mod_avail.sum(axis=0)[str_mod_ind], 1).bool(), device)
-        keep_kg_mask = torch.ones(masks.shape[1])
-        keep_kg_mask[kg_mod_ind] = 0
-        keep_kg_mask = to_device(keep_kg_mask.repeat(mod_avail.sum(axis=0)[kg_mod_ind], 1).bool(), device)
-        keep_cv_mask = torch.ones(masks.shape[1])
-        keep_cv_mask[cv_mod_ind] = 0
-        keep_cv_mask = to_device(keep_cv_mask.repeat(mod_avail.sum(axis=0)[cv_mod_ind], 1).bool(), device)
-        keep_tx_mcf7_mask = torch.ones(masks.shape[1])
-        keep_tx_mcf7_mask[tx_mcf7_mod_ind] = 0
-        keep_tx_mcf7_mask = to_device(keep_tx_mcf7_mask.repeat(mod_avail.sum(axis=0)[tx_mcf7_mod_ind], 1).bool(), device)
-        keep_tx_pc3_mask = torch.ones(masks.shape[1])
-        keep_tx_pc3_mask[tx_pc3_mod_ind] = 0
-        keep_tx_pc3_mask = to_device(keep_tx_pc3_mask.repeat(mod_avail.sum(axis=0)[tx_pc3_mod_ind], 1).bool(), device)
-        keep_tx_vcap_mask = torch.ones(masks.shape[1])
-        keep_tx_vcap_mask[tx_vcap_mod_ind] = 0
-        keep_tx_vcap_mask = to_device(keep_tx_vcap_mask.repeat(mod_avail.sum(axis=0)[tx_vcap_mod_ind], 1).bool(), device)
-
-        encoder.eval()
-        drug_ids = torch.from_numpy(drug_ids)
-        str_indices_bool = torch.from_numpy(masks[:, str_mod_ind] == 0)
-        str_embedding = encoder(drug_ids[str_indices_bool].to(device), keep_str_mask, mols[str_indices_bool], kgs, cvs[str_indices_bool], {cell_line: {k: v[str_indices_bool] for k, v in tx_cell_line.items()} for cell_line, tx_cell_line in tx_all_cell_lines.items()}, raw_encoder_output=raw_encoder_output).cpu().numpy()
-        kg_indices_bool = torch.from_numpy(masks[:, kg_mod_ind] == 0)
-        kg_embedding = encoder(drug_ids[kg_indices_bool].to(device), keep_kg_mask, mols[kg_indices_bool], kgs, cvs[kg_indices_bool], {cell_line: {k: v[kg_indices_bool] for k, v in tx_cell_line.items()} for cell_line, tx_cell_line in tx_all_cell_lines.items()}, raw_encoder_output=raw_encoder_output).cpu().numpy()
-        cv_indices_bool = torch.from_numpy(masks[:, cv_mod_ind] == 0)
-        cv_embedding = encoder(drug_ids[cv_indices_bool].to(device), keep_cv_mask, mols[cv_indices_bool], kgs, cvs[cv_indices_bool], {cell_line: {k: v[cv_indices_bool] for k, v in tx_cell_line.items()} for cell_line, tx_cell_line in tx_all_cell_lines.items()}, raw_encoder_output=raw_encoder_output).cpu().numpy()
-        tx_mcf7_indices_bool = torch.from_numpy(masks[:, tx_mcf7_mod_ind] == 0)
-        tx_mcf7_embedding = encoder(drug_ids[tx_mcf7_indices_bool].to(device), keep_tx_mcf7_mask, mols[tx_mcf7_indices_bool], kgs, cvs[tx_mcf7_indices_bool], {cell_line: {k: v[tx_mcf7_indices_bool] for k, v in tx_cell_line.items()} for cell_line, tx_cell_line in tx_all_cell_lines.items()}, raw_encoder_output=raw_encoder_output).cpu().numpy()
-        tx_pc3_indices_bool = torch.from_numpy(masks[:, tx_pc3_mod_ind] == 0)
-        tx_pc3_embedding = encoder(drug_ids[tx_pc3_indices_bool].to(device), keep_tx_pc3_mask, mols[tx_pc3_indices_bool], kgs, cvs[tx_pc3_indices_bool], {cell_line: {k: v[tx_pc3_indices_bool] for k, v in tx_cell_line.items()} for cell_line, tx_cell_line in tx_all_cell_lines.items()}, raw_encoder_output=raw_encoder_output).cpu().numpy()
-        tx_vcap_indices_bool = torch.from_numpy(masks[:, tx_vcap_mod_ind] == 0)
-        tx_vcap_embedding = encoder(drug_ids[tx_vcap_indices_bool].to(device), keep_tx_vcap_mask, mols[tx_vcap_indices_bool], kgs, cvs[tx_vcap_indices_bool], {cell_line: {k: v[tx_vcap_indices_bool] for k, v in tx_cell_line.items()} for cell_line, tx_cell_line in tx_all_cell_lines.items()}, raw_encoder_output=raw_encoder_output).cpu().numpy()
-
-        drug_ids = drug_ids[str_indices_bool].tolist() + drug_ids[kg_indices_bool].tolist() + drug_ids[cv_indices_bool].tolist() + drug_ids[tx_mcf7_indices_bool].tolist() + drug_ids[tx_pc3_indices_bool].tolist() + drug_ids[tx_vcap_indices_bool].tolist()
-    
-    # if full batch inference is not feasible (which will likely not be the case for this project)
-    elif drug_loader is not None:
-        raise NotImplementedError
-        # for i, batch_drug_indices in enumerate(train_loader):
-        #     # measure data loading time
-        #     data_time.update(time.time() - end)
-        #     batch_drug_indices = batch_drug_indices[0]  # NOTE: Because of the way TensorDataset loads data, [tensor([xxx])]
-        #     batch_mols = all_molecules[batch_drug_indices].to(device)
-        #     batch_cv = cv_store[batch_drug_indices].to(device)
-        #     batch_tx_mcf7 = tx_mcf7_store[batch_drug_indices].to(device)
-        #     batch_tx_pc3 = tx_pc3_store[batch_drug_indices].to(device)
-        #     batch_tx_vcap = tx_vcap_store[batch_drug_indices].to(device)
-
-        #     # adjust learning rate and momentum coefficient per iteration
-        #     lr = adjust_learning_rate(optimizer, epoch + i / iters_per_epoch, hparams)
-        #     learning_rates.update(lr)
-        #     # if hparams['moco_m_cos']:
-        #     #     moco_m = adjust_moco_momentum(epoch + i / iters_per_epoch, hparams)
-            
-        #     # Get two (subset sampling) masks for each drug in the batch.  Note that in `MoCo_NovelDDI`, we directly feed the input mask to the encoder, so they must already be aligned with the drugs (rather than being aligned in `NovelDDI`).
-        #     batch_mask1, batch_mask2 = pretrain_modality_subset_sampler([all_train_subset_masks[drug_ind.item()] for drug_ind in batch_drug_indices], pretrain_mode=pretrain_mode, unbalanced=unbalanced)
-        #     batch_mask1, batch_mask2 = batch_mask1.to(device), batch_mask2.to(device)
-        #     if args.too_hard_neg_mask:
-        #         batch_hard_negative_mask = hard_negative_mask[batch_drug_indices.tolist(), :][: , batch_drug_indices.tolist()].to(device)
-        #     else:
-        #         batch_hard_negative_mask = None
-                
-        #     # Get extra negative molecules for the batch (if applicable)
-        #     if all_extra_molecules is not None and extra_mol_num > 0:
-        #         batch_extra_mols = all_extra_molecules[np.random.choice(all_extra_molecules.shape[0], extra_mol_num, replace=False)]
-        #         batch_extra_mols = batch_extra_mols.to(device)
-        #     else:
-        #         batch_extra_mols = None
-            
-        #     optimizer.zero_grad()
-            
-        #     # compute output
-        #     # loss = model(batch_drug_indices, batch_mask1, batch_mask2, batch_mols, moco_m)
-        #     _, _, (logits, labels, loss) = model(batch_drug_indices, batch_mask1, batch_mask2, batch_hard_negative_mask, batch_mols, batch_cv, batch_tx_mcf7, batch_tx_pc3, batch_tx_vcap, batch_extra_mols, extra_mol_str_masks)
-
-    full_embeddings = np.concatenate((str_embedding, kg_embedding, cv_embedding, tx_mcf7_embedding, tx_pc3_embedding, tx_vcap_embedding))
-    modality_labels = ['str'] * str_embedding.shape[0] + ['kg'] * kg_embedding.shape[0] + ['cv'] * cv_embedding.shape[0] + ['tx_mcf7'] * tx_mcf7_embedding.shape[0] + ['tx_pc3'] * tx_pc3_embedding.shape[0] + ['tx_vcap'] * tx_vcap_embedding.shape[0]
-    if other_labels is not None:
-        other_labels = other_labels[masks[:, str_mod_ind] == 0].tolist() + other_labels[masks[:, kg_mod_ind] == 0].tolist() + other_labels[masks[:, cv_mod_ind] == 0].tolist() + other_labels[masks[:, tx_mcf7_mod_ind] == 0].tolist() + other_labels[masks[:, tx_pc3_mod_ind] == 0].tolist() + other_labels[masks[:, tx_vcap_mod_ind] == 0].tolist()
-    
-    logger.info("=> Fitting UMAP")
-    
-    # NOTE: 'cosine' can lead to Segmentation Fault
-    dat = UMAP(n_components=2, n_neighbors=15, min_dist=0.1, metric='euclidean', random_state=42).fit_transform(full_embeddings)  # Use 'euclidean' if 'cosine' leads to Segmentation Fault
-    
-    if other_labels is None:
-        if drug_ids is not None:
-            fig = px.scatter(x=dat[:,0], y=dat[:,1], color=modality_labels, hover_data={'drug_id':drug_ids})
-        else:
-            fig = px.scatter(x=dat[:,0], y=dat[:,1], color=modality_labels)
-    else:
-        if drug_ids is not None:
-            fig = px.scatter(x=dat[:,0], y=dat[:,1], color=other_labels, hover_data={'drug_id':drug_ids})
-        else:
-            fig = px.scatter(x=dat[:,0], y=dat[:,1], color=other_labels)
-
-    if wandb is not None:
-        wandb.log({plotname:fig}, step=epoch)
-    if output_dir is not None:
-        fig.write_image(output_dir+plotname)
-
 
 ######
 # Hook utils
@@ -474,7 +357,7 @@ def get_activation(name, activation):
 # Pretraining modality sampler
 ######
 # First derive a "modality subset bank", then in each epoch sample from the bank
-def pretrain_modality_subset_sampler(all_subset_masks: Iterable, pretrain_mode: str = 'str_center_uni', unbalanced: bool = False):
+def pretrain_modality_subset_sampler(all_subset_masks: np.ndarray, pretrain_mode: str = 'str_center_uni', unbalanced: bool = False):
     if pretrain_mode in {'str_center', 'str_center_uni', 'str_center_comb'}:
         if not unbalanced:  # In this case the all_subset_masks is a list of tuples of (subset_masks, subset_probs)
             aug1 = torch.ones_like(torch.from_numpy(all_subset_masks[0][0][0]))  # first mask list & prob tuple -> first mask list -> first mask
@@ -512,7 +395,7 @@ def powerset(iterable):
     return chain.from_iterable(combinations(s, r) for r in range(len(s)+1))
 
 
-def from_indices_to_tensor(indices: Iterable, size: Union[tuple, int], value: Union[int, float] = 0, base_value: Union[int, float] = 1, dim: int = -1):
+def from_indices_to_tensor(indices: Iterable, size: tuple, value: Union[int, float] = 0, base_value: Union[int, float] = 1, dim: int = -1):
     """ Transform a tensor of indices (where the dimensions except for the `dim` dimension are the same as expected output `size`) to a tensor of size `size` with value at the `indices` (over dim `dim`) and `base_value` elsewhere
     E.g., from_indices_to_tensor([[0, 1], [1, 2]], (2, 3), value=1, base_value=0, dim=1) -> [[1, 1, 0], [0, 1, 1]]
     """
@@ -533,69 +416,6 @@ def save_checkpoint(state, is_best, filename='checkpoint.pt'):
     torch.save(state, filename)
     if is_best:
         shutil.copyfile(filename, 'model_best.pt')
-
-
-# TODO: Update
-@torch.no_grad()
-def save_embeds(encoder, train_drugs, val_drugs, masks, collator, save_dir, device, raw_encoder_output=False):
-    encoder.eval()
-    # full_mask = torch.zeros_like(masks[0]).bool()
-
-    # TODO: Save attention weights (see `predict.py`)
-    # activation = {}
-    # activation_order = []
-    # encoder.transformer.transformer_encoder.layers[-1].self_attn.register_forward_hook(get_activation('last-layer-attention', activation))
-
-    train_outputs = {}
-    val_outputs = {}
-    
-    for index, subset_mask in enumerate(torch.eye(masks.shape[1])):
-        # NOTE: only save for str, kg, cv, tx_mcf7, tx_pc3, tx_vcap
-        if index not in {0, 1, 2, 13, 15, 17}:
-            continue
-        # indices = torch.where(subset_mask==0)[0]
-        # val_valid_drugs = val_drugs[(1 - masks[val_drugs, :][:, indices]).sum(axis=1) == len(indices)]  # Get val drugs that have the required modalities (subset1 and subset2)
-        val_valid_drugs = val_drugs[masks[val_drugs, :][:, index] == 0]  # Get val drugs that have the required modality
-        val_valid_drugs, val_valid_data = to_device(collator([val_valid_drugs]), device)
-        val_valid_mols, val_valid_kgs, val_valid_cvs, val_valid_tx_all_cell_lines = val_valid_data
-        val_valid_masks = to_device(~(subset_mask.repeat(val_valid_drugs.shape[0], 1).bool()), device)
-        
-        val_valid_embeds = encoder(val_valid_drugs, val_valid_masks, val_valid_mols, val_valid_kgs, val_valid_cvs, val_valid_tx_all_cell_lines, raw_encoder_output=raw_encoder_output).cpu()
-        
-        # indices_str = ''.join(np.array(indices.tolist()).astype(str))
-        # if len(indices) > 1:
-        #     activation_order.append(f'val_{indices_str}')
-        if save_dir is not None:
-            torch.save({'drugs':val_valid_drugs.detach().cpu().numpy(), 'embeds':val_valid_embeds, 'masks':masks[val_valid_drugs.detach().cpu().numpy()]}, save_dir + f'/val_embeds_{index}.pt')
-        
-        # val_outputs[indices_str] = {}
-        # val_outputs[indices_str]['embeds'] = val_valid_embeds
-        # val_outputs[indices_str]['drugs'] = val_valid_drugs
-        val_outputs[str(index)] = {}
-        val_outputs[str(index)]['embeds'] = val_valid_embeds
-        val_outputs[str(index)]['drugs'] = val_valid_drugs.detach().cpu().numpy()
-
-        # train_valid_drugs = train_drugs[(1 - masks[train_drugs, :][:, indices]).sum(axis=1) == len(indices)]  # Get train drugs that have the required modalities (subset1 and subset2)
-        train_valid_drugs = train_drugs[masks[train_drugs, :][:, index] == 0]  # Get train drugs that have the required modality
-        train_valid_drugs, train_valid_data = to_device(collator([train_valid_drugs]), device)
-        train_valid_mols, train_valid_kgs, train_valid_cvs, train_valid_tx_all_cell_lines = train_valid_data
-        train_valid_masks = to_device(~(subset_mask.repeat(train_valid_drugs.shape[0], 1).bool()), device)
-        
-        train_valid_embeds = encoder(train_valid_drugs, train_valid_masks, train_valid_mols, train_valid_kgs, train_valid_cvs, train_valid_tx_all_cell_lines, raw_encoder_output=raw_encoder_output).cpu()
-        
-        # if len(indices) > 1:
-            # activation_order.append(f'train_{indices_str}')
-        if save_dir is not None:
-            torch.save({'drugs':train_valid_drugs.detach().cpu().numpy(), 'embeds':train_valid_embeds, 'masks':masks[train_valid_drugs.detach().cpu().numpy()]}, save_dir + f'/train_embeds_{index}.pt')
-
-        train_outputs[str(index)] = {}
-        train_outputs[str(index)]['embeds'] = train_valid_embeds
-        train_outputs[str(index)]['drugs'] = train_valid_drugs.detach().cpu().numpy()
-    
-    # if save_dir is not None:
-        # torch.save(activation.update({'order':activation_order}), save_dir + f'/attention_weights_{epoch}.pt')
-
-    return train_outputs, val_outputs
 
 
 ######
@@ -619,8 +439,8 @@ def set_seed(seed: int):
     random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.deterministic = True # type: ignore
+    torch.backends.cudnn.benchmark = True # type: ignore
     
     
 def get_parameter_names(model, forbidden_layer_types):
@@ -644,15 +464,15 @@ def create_optimizer(model, hparams):
     """
     Enable independent learning rates for different parts of the model.
     """
-    from madrigal.models.models import HAN, HGT, RGCN, MLPEncoder, TransformerFusion, PositionEncodingSinusoidal, PositionEncodingLearnable, MLPAdaptor, BilinearDDIScorer, NovelDDIEncoder, NovelDDIMultilabel
-    from madrigal.chemcpa.chemCPA.model import TxAdaptingComPert
+    from .models.models import HAN, HGT, RGCN, MLPEncoder, TransformerFusion, PositionEncodingSinusoidal, PositionEncodingLearnable, MLPAdaptor, BilinearDDIScorer, NovelDDIEncoder
+    from .chemcpa.chemCPA.model import TxAdaptingComPert
     
     decay_params = get_parameter_names(model, [nn.LayerNorm])
     decay_params = [name for name in decay_params if "bias" not in name]
     
     str_encoder_params = get_parameter_names(model, [HAN, HGT, RGCN, MLPEncoder, TxAdaptingComPert, MLPAdaptor, PositionEncodingSinusoidal, PositionEncodingLearnable, TransformerFusion, BilinearDDIScorer])  # Either GIN or GAT
     kg_encoder_params = get_parameter_names(model, [models.GraphAttentionNetwork, models.GraphIsomorphismNetwork, MLPEncoder, TxAdaptingComPert, MLPAdaptor, PositionEncodingSinusoidal, PositionEncodingLearnable, TransformerFusion, BilinearDDIScorer])  # Either HGT, HAN, or RGCN
-    cv_encoders_params = get_parameter_names(model, [HAN, HGT, RGCN, models.GraphAttentionNetwork, models.GraphIsomorphismNetwork, TxAdaptingComPert, MLPAdaptor, PositionEncodingSinusoidal, PositionEncodingLearnable, TransformerFusion, BilinearDDIScorer])
+    tabular_mod_encoders_params = get_parameter_names(model, [HAN, HGT, RGCN, models.GraphAttentionNetwork, models.GraphIsomorphismNetwork, TxAdaptingComPert, MLPAdaptor, PositionEncodingSinusoidal, PositionEncodingLearnable, TransformerFusion, BilinearDDIScorer])
     tx_encoders_params = get_parameter_names(model, [HAN, HGT, RGCN, models.GraphAttentionNetwork, models.GraphIsomorphismNetwork, MLPEncoder, MLPAdaptor, PositionEncodingSinusoidal, PositionEncodingLearnable, TransformerFusion, BilinearDDIScorer])
     fusion_params = get_parameter_names(model, [HAN, HGT, RGCN, models.GraphAttentionNetwork, models.GraphIsomorphismNetwork, MLPEncoder, TxAdaptingComPert, BilinearDDIScorer])  # MLP, TransformerFusion, PositionEncoding
     fusion_params += list(model._parameters.keys())  # NOTE: Add [CLS] and [TX_BOTTLENECK] into fusion_params
@@ -668,8 +488,8 @@ def create_optimizer(model, hparams):
     kg_encoder_no_decay_params = list(set(kg_encoder_params) - set(decay_params))
     kg_encoder_decay_params = list(set(kg_encoder_params) & set(decay_params))
     
-    cv_encoders_no_decay_params = list(set(cv_encoders_params) - set(decay_params))
-    cv_encoders_decay_params = list(set(cv_encoders_params) & set(decay_params))
+    tabular_mod_encoders_no_decay_params = list(set(tabular_mod_encoders_params) - set(decay_params))
+    tabular_mod_encoders_decay_params = list(set(tabular_mod_encoders_params) & set(decay_params))
 
     tx_encoders_no_decay_params = list(set(tx_encoders_params) - set(decay_params))
     tx_encoders_decay_params = list(set(tx_encoders_params) & set(decay_params))
@@ -718,7 +538,7 @@ def create_optimizer(model, hparams):
             "params": [
                 p
                 for n, p in model.named_parameters()
-                if n in cv_encoders_no_decay_params
+                if n in tabular_mod_encoders_no_decay_params
             ],
             "weight_decay": 0.0,
             "lr": hparams['perturb_encoders_lr'],
@@ -727,7 +547,7 @@ def create_optimizer(model, hparams):
             "params": [
                 p
                 for n, p in model.named_parameters()
-                if n in cv_encoders_decay_params
+                if n in tabular_mod_encoders_decay_params
             ],
             "weight_decay": hparams['wd'],
             "lr": hparams['perturb_encoders_lr'],
@@ -815,7 +635,7 @@ class LARS(torch.optim.Optimizer):
         super().__init__(params, defaults)
 
     @torch.no_grad()
-    def step(self):
+    def step(self): # type: ignore
         for g in self.param_groups:
             for p in g['params']:
                 dp = p.grad
@@ -849,7 +669,7 @@ class LinearWarmupCosineDecaySchedule(_LRScheduler):
         self.num_cycles = num_cycles
         super(LinearWarmupCosineDecaySchedule, self).__init__(optimizer, last_epoch)
 
-    def get_lr(self):
+    def get_lr(self): # type: ignore
         cur_epoch = self.last_epoch
         if cur_epoch < self.warmup_epochs:
             return [base_lr * cur_epoch / self.warmup_epochs for base_lr in self.base_lrs]
@@ -919,7 +739,7 @@ class ProgressMeter(object):
         return '[' + fmt + '/' + fmt.format(num_batches) + ']'
 
 
-def get_root_logger(fname=None, file=True):
+def get_root_logger(fname: str = "out", file: bool = True):
     logger = logging.getLogger("")
     logger.setLevel(logging.INFO)
     format = logging.Formatter("[%(asctime)-10s] %(message)s", '%m/%d/%Y %H:%M:%S')

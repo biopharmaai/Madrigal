@@ -1,28 +1,24 @@
-import math, os, random, time, wandb
+import math, os, time, wandb
 from datetime import datetime
 import numpy as np
-import pandas as pd
-from sklearn.model_selection import train_test_split
 
 # os.environ["CUDA_VISIBLE_DEVICES"]='1'
 # os.environ["CUDA_LAUNCH_BLOCKING"]="1"
 
 import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
 
 from madrigal.parse_args import create_parser, get_hparams
-# from madrigal.models.moco import MoCo_NovelDDI
 from madrigal.models.simclr import SimCLR_NovelDDI
 from madrigal.evaluate.evaluate import evaluate_final_embeds, evaluate_pt, stacked_inst_dist_topk_accuracy
+from madrigal.evaluate.eval_utils import save_embeds
 from madrigal.data.data import get_pretrain_data
+from madrigal.evaluate.eval_utils import draw_umap_plot
 from madrigal.utils import (
+    NON_TX_MODALITIES,
     set_seed,
     AverageMeter,
     ProgressMeter,
     pretrain_modality_subset_sampler,
-    draw_umap_plot,
-    save_embeds,
     save_checkpoint,
     get_root_logger,
     get_str_encoder_hparams,
@@ -130,7 +126,9 @@ def main(args, hparams, wandb, logger, output_dir, device = DEVICE):
     
     str_encoder_hparams = get_str_encoder_hparams(args, hparams)
     kg_encoder_hparams = get_kg_encoder_hparams(args, hparams)
-    cv_encoder_hparams = get_cv_encoder_hparams(args, hparams, collator.cv_store.shape[-1])
+    tab_mod_encoder_hparams_dict = {}
+    for mod in NON_TX_MODALITIES[2:]:
+        tab_mod_encoder_hparams_dict[mod] = get_cv_encoder_hparams(args, hparams, collator.tabular_mod_stores[mod].shape[-1])
     tx_encoder_hparams = get_tx_encoder_hparams(args, hparams, list(collator.tx_store_dict.values())[0]['sigs'].shape[-1])
     proj_hparams = get_proj_hparams(hparams)
     transformer_fusion_hparams = get_transformer_fusion_hparams(args, hparams)
@@ -144,7 +142,7 @@ def main(args, hparams, wandb, logger, output_dir, device = DEVICE):
         kg_encoder_name=args.kg_encoder,
         kg_encoder_hparams=kg_encoder_hparams,
         cv_encoder_name=args.cv_encoder,
-        cv_encoder_hparams=cv_encoder_hparams,
+        cv_encoder_hparams=tab_mod_encoder_hparams_dict["cv"],
         tx_encoder_name=args.tx_encoder,
         tx_encoder_hparams=tx_encoder_hparams,
         num_attention_bottlenecks=args.num_attention_bottlenecks,
@@ -164,6 +162,7 @@ def main(args, hparams, wandb, logger, output_dir, device = DEVICE):
         logger=logger,
         use_modality_pretrain=args.use_modality_pretrain,
         use_tx_basal=args.use_tx_basal,
+        tab_mod_encoder_hparams_dict=tab_mod_encoder_hparams_dict,
     )
     
     model = SimCLR_NovelDDI(encoder, hparams['feature_dim'], hparams['moco_mlp_dim'], hparams['moco_t'], raw_encoder_output=hparams['raw_encoder_output'], shared_predictor=hparams['shared_predictor'])
@@ -202,7 +201,7 @@ def main(args, hparams, wandb, logger, output_dir, device = DEVICE):
     
     if args.save_checkpoints != 0:
         logger.info('Saving embeddings before pretraining')
-        save_dir = output_dir + f'before_pretrain/'
+        save_dir = output_dir + 'before_pretrain/'
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
         train_outputs, val_outputs = save_embeds(model.base_encoder, train_drugs, val_drugs, masks, collator, save_dir, device, raw_encoder_output=hparams['raw_encoder_output'])
@@ -236,12 +235,12 @@ def main(args, hparams, wandb, logger, output_dir, device = DEVICE):
                 'kg_args': kg_args,
             }, is_best=False, filename=output_dir+f'checkpoint_{epoch}.pt')
             
-            pretrain_drugs = np.concatenate([train_drugs, val_drugs])
+            # pretrain_drugs = np.concatenate([train_drugs, val_drugs])
             # NOTE: Segmentation faults might occur here.
             logger.info('draw_umap_plot train')
-            draw_umap_plot({indices_str:output['embeds'] for indices_str, output in all_train_outputs.items()}, None, {indices:output['drugs'].tolist() for indices, output in all_train_outputs.items()}, None, None, None, f'train_epoch', wandb, None, logger, epoch=epoch, raw_encoder_output=hparams['raw_encoder_output'])
+            draw_umap_plot({indices_str:output['embeds'] for indices_str, output in all_train_outputs.items()}, None, {indices:output['drugs'].tolist() for indices, output in all_train_outputs.items()}, None, None, None, 'train_epoch', wandb, None, logger, epoch=epoch, raw_encoder_output=hparams['raw_encoder_output'])
             logger.info('draw_umap_plot val')
-            draw_umap_plot({indices_str:output['embeds'] for indices_str, output in all_val_outputs.items()}, None, {indices:output['drugs'].tolist() for indices, output in all_val_outputs.items()}, None, None, None, f'val_epoch', wandb, None, logger, epoch=epoch, raw_encoder_output=hparams['raw_encoder_output'])
+            draw_umap_plot({indices_str:output['embeds'] for indices_str, output in all_val_outputs.items()}, None, {indices:output['drugs'].tolist() for indices, output in all_val_outputs.items()}, None, None, None, 'val_epoch', wandb, None, logger, epoch=epoch, raw_encoder_output=hparams['raw_encoder_output'])
             # logger.info('draw_umap_plot train_val')
             # draw_umap_plot(None, model.base_encoder, pretrain_drugs, pretrain_loader, masks, collator, f'train_val_epoch', wandb, device, logger, epoch=epoch, other_labels = np.array(['train'] * train_drugs.shape[0] + ['val'] * val_drugs.shape[0]), raw_encoder_output=hparams['raw_encoder_output'])
 

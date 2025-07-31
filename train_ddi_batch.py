@@ -1,18 +1,13 @@
-from typing import Tuple, Union
-import os, random, json, gc
+import os
+import gc
 from datetime import datetime
-import pandas as pd
-import numpy as np
-from tqdm import tqdm
-from copy import deepcopy
 
 # os.environ["CUDA_LAUNCH_BLOCKING"]="1"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:2048"
 
-import torch, wandb
+import torch
+import wandb
 import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import DistributedSampler, DataLoader, RandomSampler, SequentialSampler
 # import torch.multiprocessing as mp
 # from torch.distributed import init_process_group, get_rank, get_world_size
 import torch_geometric.transforms as T
@@ -25,8 +20,8 @@ from madrigal.evaluate.predict import test
 from madrigal.parse_args import create_parser, get_hparams
 from madrigal.data.data import get_train_data
 from madrigal.utils import (
+    NON_TX_MODALITIES,
     get_model,
-    # get_train_masks,
     get_loss_fn,
     create_optimizer,
     to_device,
@@ -47,7 +42,7 @@ SEED = 42
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def train(train_loader, val_loaders, task, all_kg_data, num_labels, num_epochs, loss_fn_name, feature_dim, str_encoder, str_encoder_hparams, str_node_feat_dim, kg_encoder, kg_encoder_hparams, cv_encoder, cv_encoder_hparams, tx_encoder, tx_encoder_hparams, transformer_fusion_hparams, proj_hparams, hparams, save_dir, split_method, finetune_mode, device, logger, frozen=False, intermediate_figs_savedir=None):
+def train(train_loader, val_loaders, task, all_kg_data, num_labels, num_epochs, loss_fn_name, feature_dim, str_encoder, str_encoder_hparams, str_node_feat_dim, kg_encoder, kg_encoder_hparams, cv_encoder, cv_encoder_hparams, tx_encoder, tx_encoder_hparams, transformer_fusion_hparams, proj_hparams, hparams, save_dir, split_method, finetune_mode, device, logger, frozen=False, tab_mod_encoder_hparams_dict=None):
     """ Main training function
     """
     model, encoder_configs, model_configs = get_model(
@@ -80,6 +75,7 @@ def train(train_loader, val_loaders, task, all_kg_data, num_labels, num_epochs, 
         use_modality_pretrain=hparams["use_modality_pretrain"],
         adapt_before_fusion=hparams["adapt_before_fusion"],
         use_pretrained_adaptor=hparams["use_pretrained_adaptor"],
+        tab_mod_encoder_hparams_dict=tab_mod_encoder_hparams_dict,
     )
     
     if hparams["checkpoint"] is not None:
@@ -201,11 +197,9 @@ def train(train_loader, val_loaders, task, all_kg_data, num_labels, num_epochs, 
         
     # NOTE: For efficiency in full batch training, we use the fact that head and tail drugs are the same set.
     elif finetune_mode == "str_str+random_sample":  # NOTE: will be used as str-str (directed) + str-str+random (undirected) + str+random-str+random (directed)
-        # NOTE: Although pre-computing all subset masks is difficult (one subset will have at most 2^19 elements), it provides the possibly most balanced way of sampling combinations (see models notebook for a comparison between powerset-based sampling vs Bernoulli independent modality sampling)
         head_all_subset_masks = [torch.stack([from_indices_to_tensor(list(indices), head_masks_base.shape[1]) for indices in list(powerset(torch.where(mask==0)[0].tolist()))[1:] if 0 in indices]) for mask in head_masks_base.int()]  # generate only subset masks that contain structure modality
     
     elif finetune_mode in {"str_random_sample", "double_random"}:  # NOTE: "str_random_sample" will be used as str-str (directed) + str-random (undirected) + random-random (directed); while "double_random" will be random-random (undirected)
-        # NOTE: 
         head_all_subset_masks = [torch.stack([from_indices_to_tensor(list(indices), head_masks_base.shape[1]) for indices in list(powerset(torch.where(mask==0)[0].tolist()))[1:]]) for mask in head_masks_base.int()]
         
     elif finetune_mode in {
@@ -232,6 +226,7 @@ def train(train_loader, val_loaders, task, all_kg_data, num_labels, num_epochs, 
     best_val_within_metrics = {}
     
     best_epoch = None
+    best_within_epoch = None
     wandb.watch(model, log="all", log_freq=200)
     for epoch in range(num_epochs):
         logger.info(f"Epoch {epoch+1}/{num_epochs}")
@@ -254,7 +249,7 @@ def train(train_loader, val_loaders, task, all_kg_data, num_labels, num_epochs, 
             masks_str = torch.ones_like(head_masks_base)
             masks_str[:, 0] = 0
             masks_str = masks_str.bool()
-            masks_X = torch.stack([subset_masks[torch.randperm(len(subset_masks)-1)[0] + 1] if len(subset_masks)>1 else subset_masks[0] for subset_masks in head_all_subset_masks], dim=0).bool()  # NOTE: We don"t want to retrieve the structure-only mask, so we used the +1 offset ([0, 1, 1, ...] is always the first among all subset masks). Still need to consider adding dummy 0"s for those str_only drugs.
+            masks_X = torch.stack([subset_masks[torch.randperm(len(subset_masks)-1)[0] + 1] if len(subset_masks)>1 else subset_masks[0] for subset_masks in head_all_subset_masks], dim=0).bool()  # NOTE: We don't want to retrieve the structure-only mask, so we used the +1 offset ([0, 1, 1, ...] is always the first among all subset masks). Still need to consider adding dummy 0"s for those str_only drugs.
             
             # NOTE: Similar to the above, we could duplicate and separate the ddi edge list into 4 directed lists.  For first list (str-str), keep them all.  For the second and third lists (str-X, X-str), remove the entries where X is str.  For the fourth (X-X where X are the same), remove the entries where both X are str.
             
@@ -270,9 +265,8 @@ def train(train_loader, val_loaders, task, all_kg_data, num_labels, num_epochs, 
         else:
             raise NotImplementedError
         
-        # Start real training
+        # Start training
         model.train()
-        assert model.encoder.use_tx_basal == False  # TODO: remove this line after debugging
         batch_head = to_device(batch_head, device)
         batch_tail = to_device(batch_tail, device)
         batch_kg = to_device(batch_kg, device)
@@ -380,7 +374,7 @@ def train(train_loader, val_loaders, task, all_kg_data, num_labels, num_epochs, 
             )  # NOTE: For the str_X cases, this is only calculating the batch metrics for the str_X case, not the str_str or X_X cases
             wandb.log({f"train_batch_{metric_name}": metric_value for metric_name, metric_value in train_metrics.items()}, step=epoch)
             
-            if split_method in {"split_by_triplets", "split_by_pairs"}:    
+            if split_method in {"split_by_triplets", "split_by_pairs"}: 
                 logger.info("Val:")
                 val_key_metric = evaluate_ft(model, val_batches[0], loss_fn, k=K, task=task, split="val", finetune_mode=finetune_mode, best_metrics=best_val_metrics, subgroup=False, verbose=True, device=device, logger=logger, wandb=wandb, epoch=epoch)
 
@@ -403,7 +397,7 @@ def train(train_loader, val_loaders, task, all_kg_data, num_labels, num_epochs, 
                             "encoder_configs":encoder_configs,
                             "model_configs":model_configs,
                         }, 
-                        save_dir+f"best_model.pt")
+                        save_dir+"best_model.pt")
                 if "drugs" in split_method:
                     if val_within_key_metric > best_val_within_key_metric:
                         best_val_within_key_metric = val_within_key_metric
@@ -415,7 +409,7 @@ def train(train_loader, val_loaders, task, all_kg_data, num_labels, num_epochs, 
                                 "encoder_configs":encoder_configs,
                                 "model_configs":model_configs,
                             }, 
-                            save_dir+f"best_within_model.pt") 
+                            save_dir+"best_within_model.pt") 
 
     wandb.log(best_val_metrics)
     
@@ -475,7 +469,10 @@ def main():
     # Collate hidden dims for structural encoder. Same should be done for Cv/Ts MLPs, maybe wrap in a function
     str_encoder_hparams = get_str_encoder_hparams(args, hparams)
     kg_encoder_hparams = get_kg_encoder_hparams(args, hparams)  # hparams["han_att_heads"], hparams["han_hidden_dim"]
-    cv_encoder_hparams = get_cv_encoder_hparams(args, hparams, train_collator.cv_df.shape[0])
+    cv_encoder_hparams = get_cv_encoder_hparams(args, hparams, train_collator.tabular_mod_dfs["cv"].shape[0])
+    tab_mod_encoder_hparams_dict = {}
+    for mod in NON_TX_MODALITIES[2:]:
+        tab_mod_encoder_hparams_dict[mod] = get_cv_encoder_hparams(args, hparams, train_collator.tabular_mod_dfs[mod].shape[0])
     tx_encoder_hparams = get_tx_encoder_hparams(args, hparams, train_collator.tx_df.shape[0])
     proj_hparams = get_proj_hparams(hparams)
     transformer_fusion_hparams = get_transformer_fusion_hparams(args, hparams)
@@ -507,7 +504,7 @@ def main():
         device, 
         logger, 
         args.frozen, 
-        args.intermediate_figs_savedir, 
+        tab_mod_encoder_hparams_dict, 
     )
     wandb.log({"best_epoch": best_epoch, "best_within_epoch": best_within_epoch})
 

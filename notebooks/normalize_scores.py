@@ -1,11 +1,8 @@
-import pandas as pd
 import numpy as np
-import os, pickle
-from tqdm import tqdm
 from time import time
 from multiprocessing import Pool
 
-from madrigal.utils import DATA_DIR, BASE_DIR
+from madrigal.utils import BASE_DIR
 
 data_source = 'DrugBank'
 split_method = 'split_by_pairs'

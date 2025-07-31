@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import nn, Tensor
-import os
+from torch.nn import BCEWithLogitsLoss
 
 ## PyTorch Geometric
 from torch_geometric.nn import HANConv, RGCNConv, HGTConv, HeteroLinear
@@ -17,13 +17,12 @@ from torchdrug import models
 
 from ..utils import (
     MOL_DIM, 
-    MAX_DRUGS,
     CELL_LINES, 
-    CELL_LINES_CAPITALIZED, 
+    CELL_LINES_CAPITALIZED,
+    NON_TX_MODALITIES, 
     NUM_NON_TX_MODALITIES,
     NUM_MODALITIES,
     DATA_DIR,
-    BASE_DIR,
     ENCODER_CKPT_DIR,
 )
 from ..chemcpa.chemCPA.model import TxAdaptingComPert
@@ -248,16 +247,16 @@ def get_kg_encoder(kg_encoder_name, kg_encoder_hparams, embed_dim, all_kg_data, 
     return kg_encoder
 
 
-def get_cv_encoder(cv_encoder_name, cv_encoder_hparams, embed_dim, use_modality_pretrain=True):
-    assert cv_encoder_name == 'mlp'
-    cv_encoder = MLPEncoder(cv_encoder_hparams['cv_input_dim'], cv_encoder_hparams['cv_mlp_hidden_dims'], embed_dim, cv_encoder_hparams['cv_mlp_dropout'], cv_encoder_hparams['cv_mlp_norm'], cv_encoder_hparams['cv_mlp_actn'], cv_encoder_hparams['cv_mlp_order'])
+def get_tabular_mod_encoder(mod_encoder_name, mod_encoder_hparams, embed_dim, use_modality_pretrain=True, mod="cv"):
+    assert mod_encoder_name == 'mlp'
+    mod_encoder = MLPEncoder(mod_encoder_hparams['cv_input_dim'], mod_encoder_hparams['cv_mlp_hidden_dims'], embed_dim, mod_encoder_hparams['cv_mlp_dropout'], mod_encoder_hparams['cv_mlp_norm'], mod_encoder_hparams['cv_mlp_actn'], mod_encoder_hparams['cv_mlp_order'])  # TODO: Workaround -- Use cv_* as hyperparams for all tabular modalities
     
     if use_modality_pretrain:
-        print('Using pretrained CV encoder')
-        pre_trained_path = ENCODER_CKPT_DIR + 'cv/cv_model_ae.pt'
-        cv_encoder.load_state_dict(torch.load(pre_trained_path, map_location=torch.device('cpu')))
+        print(f'Using pretrained {mod} encoder')
+        pre_trained_path = ENCODER_CKPT_DIR + f'{mod}/{mod}_model_ae.pt'
+        mod_encoder.load_state_dict(torch.load(pre_trained_path, map_location=torch.device('cpu')))
         
-    return cv_encoder
+    return mod_encoder
 
 
 def get_tx_encoder(tx_encoder_name, tx_encoder_hparams, embed_dim, use_modality_pretrain=True):
@@ -628,8 +627,17 @@ class NovelDDIEncoder(nn.Module):
         self.kg_encoder = get_kg_encoder(kg_encoder_name, kg_encoder_hparams, self.embed_dim, all_kg_data, use_modality_pretrain)
         # self.kg_out_placeholder = torch.randn((MAX_DRUGS, self.embed_dim))  # NOTE: Create a place holder tensor for all drug nodes needed for us. Allows drugs not actually in the KG to have a random embedding. 
         
-        # get cv encoder
-        self.cv_encoder = get_cv_encoder(cv_encoder_name, cv_encoder_hparams, self.embed_dim, use_modality_pretrain)
+        # get tabular mod encoder
+        self.cv_encoder = get_tabular_mod_encoder(cv_encoder_name, cv_encoder_hparams, self.embed_dim, use_modality_pretrain, mod="cv")
+        
+        tab_mod_encoder_hparams_dict = kwargs.get('tab_mod_encoder_hparams_dict', None)
+        self.tabular_mod_encoders = nn.ModuleDict()
+        assert (NUM_NON_TX_MODALITIES == 3) or (len(set(["bs", "bs2"]).intersection(set(list(tab_mod_encoder_hparams_dict.keys())))) > 0) 
+        if tab_mod_encoder_hparams_dict is not None and len(tab_mod_encoder_hparams_dict) > 1:  # TODO: tab_mod_encoder_hparams_dict currently includes cv
+            for mod, mod_encoder_hparams in tab_mod_encoder_hparams_dict.items():
+                if mod == 'cv':
+                    continue
+                self.tabular_mod_encoders[mod] = get_tabular_mod_encoder(cv_encoder_name, mod_encoder_hparams, self.embed_dim, False, mod=mod)  # TODO: Workaround -- currently set all other mods to no pretrain
 
         # get tx encoder
         if tx_encoder_name == 'mlp':
@@ -641,8 +649,6 @@ class NovelDDIEncoder(nn.Module):
             self.tx_cell_line_onehot_encoder.fit(cell_lines.reshape(-1, 1))  # NOTE: The cell line orders in modality availability and here (for cell line embeddings in chemCPA) are different, but it doesn't matter since these two components are separate
         else:
             raise NotImplementedError
-        
-        # TODO: Add other modalities
         
         # enable using attention bottleneck
         self.num_tx_bottlenecks = num_tx_bottlenecks
@@ -707,7 +713,8 @@ class NovelDDIEncoder(nn.Module):
         if fusion == 'transformer_uni_proj':
             self.uni_fuser = MLPAdaptor(self.embed_dim, proj_hparams['proj_hidden_dims'], self.embed_dim, proj_hparams['proj_dropout'], proj_hparams['proj_norm'], proj_hparams['proj_actn'], proj_hparams['proj_order'])
 
-    def encode(self, batch_drugs, batch_masks, batch_mols, batch_kg, batch_cv, batch_tx_dict, raw_encoder_output=False):
+    # TODO Improve other tabular mod workaround
+    def encode(self, batch_drugs, batch_masks, batch_mols, batch_kg, batch_cv, batch_tx_dict, raw_encoder_output=False, **kwargs):
         ## Encoders
         # structure
         str_out_raw = self.str_encoder(batch_mols, batch_mols.node_feature.float())
@@ -733,6 +740,15 @@ class NovelDDIEncoder(nn.Module):
         # cv
         cv_out = self.cv_encoder(batch_cv)
         
+        # TODO: workaround
+        # other tabular mods
+        other_tabular_mod_out = []
+        if len(self.tabular_mod_encoders) > 0:
+            for mod in NON_TX_MODALITIES[3:]:
+                batch_mod = kwargs.get(mod, None)
+                assert batch_mod is not None, f"Missing {mod} in the input batch"
+                other_tabular_mod_out.append(self.tabular_mod_encoders[mod](batch_mod))
+        
         # tx
         if self.tx_encoder_dict is not None:
             tx_out_all_cell_lines = [self.tx_encoder_dict[cell_line](batch_tx_dict[cell_line]['sigs']) for cell_line in CELL_LINES]
@@ -753,7 +769,7 @@ class NovelDDIEncoder(nn.Module):
             tx_out_all_cell_lines = list(torch.split(tx_out_cell_line, split_size_or_sections=tx_out_cell_line.shape[0]//len(CELL_LINES), dim=0))
         
         # join all
-        all_embeds = [str_out, kg_out, cv_out] + tx_out_all_cell_lines
+        all_embeds = [str_out, kg_out, cv_out] + other_tabular_mod_out + tx_out_all_cell_lines
         
         ## process before fusion
         all_embeds = torch.stack(all_embeds, dim=1)  # [batch_size, num_modalities, embed_dim]
@@ -879,20 +895,33 @@ class NovelDDIEncoder(nn.Module):
             
         return z
 
-    def forward(self, batch_drugs, batch_masks, batch_mols, batch_kg, batch_cv, batch_tx_dict, raw_encoder_output=False):
-        return self.encode(batch_drugs, batch_masks, batch_mols, batch_kg, batch_cv, batch_tx_dict, raw_encoder_output)
+    def forward(self, batch_drugs, batch_masks, batch_mols, batch_kg, batch_cv, batch_tx_dict, raw_encoder_output=False, **kwargs):
+        return self.encode(batch_drugs, batch_masks, batch_mols, batch_kg, batch_cv, batch_tx_dict, raw_encoder_output, **kwargs)
         
 
+# class DebugEncoder(nn.Module):
+#     def __init__(self, embed_dim):
+#         super(DebugEncoder, self).__init__()
+#         self.embed_dim = embed_dim
+#         self.Z = nn.Parameter(torch.from_numpy(np.load(BASE_DIR+"temp/morganfps.npy")).float(), requires_grad=False)
+#         # self.Z = nn.Parameter(torch.from_numpy(np.load(BASE_DIR+"temp/rdkitfps.npy")).float(), requires_grad=False)
+#         self.adaptor = nn.Linear(self.Z.shape[1], self.embed_dim)
+#     def forward(self, batch_drugs):
+#         z = self.adaptor(self.Z[batch_drugs])
+#         return z
+    
+    
 class NovelDDIMultilabel(nn.Module):
-    def __init__(self, encoder, feat_dim, prediction_dim, normalize=False):
+    def __init__(self, encoder, feat_dim, prediction_dim, prediction_dim_single_drug=None, normalize=False, use_single_drug=False):
         super(NovelDDIMultilabel, self).__init__()
         self.encoder = encoder
         self.embed_dim = feat_dim
         self.normalize = normalize
+        self.use_single_drug = use_single_drug
         self.decoder = BilinearDDIScorer(input_dim1 = self.embed_dim, input_dim2 = self.embed_dim, output_dim = prediction_dim)
         nn.utils.parametrize.register_parametrization(self.decoder, 'weight', Symmetric())
-    
-    def forward(self, batch_head, batch_tail, batch_head_mod_masks, batch_tail_mod_masks, batch_kg, label_range=None):
+
+    def forward(self, batch_head, batch_tail, batch_head_mod_masks, batch_tail_mod_masks, batch_kg, label_range=None, single_drug=False):
         head_drugs = batch_head['drugs']
         head_mol_strs = batch_head['strs']
         head_cv = batch_head['cv']
@@ -905,13 +934,21 @@ class NovelDDIMultilabel(nn.Module):
         tail_tx_all_cell_lines = batch_tail['tx']
         tail_masks = batch_tail_mod_masks
         
-        z_head = self.encoder(head_drugs, head_masks, head_mol_strs, batch_kg, head_cv, head_tx_all_cell_lines)
-        z_tail = self.encoder(tail_drugs, tail_masks, tail_mol_strs, batch_kg, tail_cv, tail_tx_all_cell_lines)
+        head_tabular_mods = {}
+        tail_tabular_mods = {}
+        if NUM_NON_TX_MODALITIES > 3:  # more than str, kg, cv
+            for mod in batch_head.keys():
+                if mod not in ['drugs', 'strs', 'masks', 'cv', 'tx']:
+                    head_tabular_mods[mod] = batch_head[mod]
+                    tail_tabular_mods[mod] = batch_tail[mod]
+        
+        z_head = self.encoder(head_drugs, head_masks, head_mol_strs, batch_kg, head_cv, head_tx_all_cell_lines, **head_tabular_mods)
+        z_tail = self.encoder(tail_drugs, tail_masks, tail_mol_strs, batch_kg, tail_cv, tail_tx_all_cell_lines, **tail_tabular_mods)
         if self.normalize:
             z_head = F.normalize(z_head)  # same as z_head / torch.norm(z_head, dim=1, keepdim=True)
             z_tail = F.normalize(z_tail)
-            
+        
         pred_scores = self.decoder(z_head, z_tail, label_range)  # [num_labels, num_heads, num_tails]
         
         return pred_scores
-
+    

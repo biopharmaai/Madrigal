@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from madrigal.utils import get_loss_fn, get_model, PROJECT_DIR
 from seml.config import generate_configs
 from seml.config import read_config
@@ -211,6 +212,9 @@ def get_full_model(args, train_collator, all_kg_data):
         "cv_mlp_actn": "relu",
         "cv_mlp_order": "nd",
     }
+    
+    tab_mod_encoder_hparams_dict = {}
+    tab_mod_encoder_hparams_dict["cv"] = cv_encoder_hparams
 
     _, _, experiment_config = read_config(tx_chemcpa_config_path)
     configs = generate_configs(experiment_config)
@@ -269,6 +273,9 @@ def get_full_model(args, train_collator, all_kg_data):
         str_node_feat_dim=train_collator.str_node_feat_dim,
         logger=None,
         use_modality_pretrain=args.use_pretrained,
+        adapt_before_fusion=False,
+        use_pretrained_adaptor=True,
+        tab_mod_encoder_hparams_dict=tab_mod_encoder_hparams_dict,
     )
 
     model = NovelDDILM(

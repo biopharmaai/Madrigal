@@ -1,6 +1,5 @@
-import os, sys, pickle
-from typing import List, Union, Tuple, Iterable, Optional
-from dataclasses import dataclass
+import os, pickle
+from typing import Dict, List, Tuple, Optional
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -17,6 +16,8 @@ from .data_utils import (
 )
 from ..utils import (
     CELL_LINES, 
+    NUM_NON_TX_MODALITIES,
+    NON_TX_MODALITIES,
     SEED, 
     CL_CKPT_DIR,
     get_pretrain_masks,
@@ -59,7 +60,7 @@ def get_datasets_all_train(args):
     return train_dataset
 
 
-def get_collators(args, drug_metadata, all_molecules, all_kg_data, train_kg_data, cv_df, tx_df, num_labels):
+def get_collators(args, drug_metadata, all_molecules, all_kg_data, train_kg_data, tabular_mod_dfs, tx_df, num_labels):
     """
     Get collators for DDI training
     """        
@@ -75,7 +76,7 @@ def get_collators(args, drug_metadata, all_molecules, all_kg_data, train_kg_data
         all_kg_data=train_kg_data,
         kg_sampling_num_neighbors=args.kg_sampling_num_neighbors,
         kg_sampling_num_layers=args.kg_sampling_num_layers,
-        cv_df=cv_df,
+        tabular_mod_dfs=tabular_mod_dfs,
         tx_df=tx_df,
         num_negative_samples_per_pair=args.num_negative_samples_per_pair, 
         negative_sampling_probs_type=args.negative_sampling_probs_type, 
@@ -95,7 +96,7 @@ def get_collators(args, drug_metadata, all_molecules, all_kg_data, train_kg_data
                 all_kg_data=train_kg_data,
                 kg_sampling_num_neighbors=None,
                 kg_sampling_num_layers=None,
-                cv_df=cv_df,
+                tabular_mod_dfs=tabular_mod_dfs,
                 tx_df=tx_df,
                 num_negative_samples_per_pair=None, 
                 negative_sampling_probs_type=None, 
@@ -113,7 +114,7 @@ def get_collators(args, drug_metadata, all_molecules, all_kg_data, train_kg_data
                 all_kg_data=train_kg_data,
                 kg_sampling_num_neighbors=None,
                 kg_sampling_num_layers=None,
-                cv_df=cv_df,
+                tabular_mod_dfs=tabular_mod_dfs,
                 tx_df=tx_df,
                 num_negative_samples_per_pair=None, 
                 negative_sampling_probs_type=None, 
@@ -133,7 +134,7 @@ def get_collators(args, drug_metadata, all_molecules, all_kg_data, train_kg_data
                 all_kg_data=all_kg_data,  # NOTE: This is different from train/val
                 kg_sampling_num_neighbors=None,
                 kg_sampling_num_layers=None,
-                cv_df=cv_df,
+                tabular_mod_dfs=tabular_mod_dfs,
                 tx_df=tx_df,
                 num_negative_samples_per_pair=None, 
                 negative_sampling_probs_type=None, 
@@ -151,7 +152,7 @@ def get_collators(args, drug_metadata, all_molecules, all_kg_data, train_kg_data
                 all_kg_data=all_kg_data,  # NOTE: This is different from train/val
                 kg_sampling_num_neighbors=None,
                 kg_sampling_num_layers=None,
-                cv_df=cv_df,
+                tabular_mod_dfs=tabular_mod_dfs,
                 tx_df=tx_df,
                 num_negative_samples_per_pair=None, 
                 negative_sampling_probs_type=None, 
@@ -172,7 +173,7 @@ def get_collators(args, drug_metadata, all_molecules, all_kg_data, train_kg_data
                 all_kg_data=train_kg_data, 
                 kg_sampling_num_neighbors=None,
                 kg_sampling_num_layers=None,
-                cv_df=cv_df,
+                tabular_mod_dfs=tabular_mod_dfs,
                 tx_df=tx_df,
                 num_negative_samples_per_pair=None, 
                 negative_sampling_probs_type=None, 
@@ -192,7 +193,7 @@ def get_collators(args, drug_metadata, all_molecules, all_kg_data, train_kg_data
                 all_kg_data=all_kg_data,
                 kg_sampling_num_neighbors=None,
                 kg_sampling_num_layers=None,
-                cv_df=cv_df,
+                tabular_mod_dfs=tabular_mod_dfs,
                 tx_df=tx_df,
                 num_negative_samples_per_pair=None, 
                 negative_sampling_probs_type=None, 
@@ -203,7 +204,7 @@ def get_collators(args, drug_metadata, all_molecules, all_kg_data, train_kg_data
     return train_collator, val_collators, test_collators
 
 
-def get_collators_all_train(args, drug_metadata, all_molecules, all_kg_data, train_kg_data, cv_df, tx_df, num_labels):
+def get_collators_all_train(args, drug_metadata, all_molecules, all_kg_data, train_kg_data, tabular_mod_dfs, tx_df, num_labels):
     """
     Get collators for DDI training
     """        
@@ -219,7 +220,7 @@ def get_collators_all_train(args, drug_metadata, all_molecules, all_kg_data, tra
         all_kg_data=train_kg_data,
         kg_sampling_num_neighbors=args.kg_sampling_num_neighbors,
         kg_sampling_num_layers=args.kg_sampling_num_layers,
-        cv_df=cv_df,
+        tabular_mod_dfs=tabular_mod_dfs,
         tx_df=tx_df,
         num_negative_samples_per_pair=args.num_negative_samples_per_pair, 
         negative_sampling_probs_type=args.negative_sampling_probs_type, 
@@ -275,10 +276,11 @@ def get_pretrain_data(args, hparams):
     """ Get all pretraining data
     NOTE: Pretraining should always be based on split-by-drugs (but random, easy, and hard should be different) -- we use only drugs not in the val/test set (technically we can also include val drugs, but during model development, we don't want to overfit to the val set).  
     """    
-    # load drug metadata, get pretraining drugs (drugs with more than one views available)
+    # load drug metadata, get pretraining drugs (drugs with more than one views available)  # TODO: New modalities
     drug_metadata = pd.read_pickle(os.path.join(args.path_base, 'views_features_new/combined_metadata_ddi.pkl'))
+    # drug_metadata = pd.read_pickle(os.path.join(args.path_base, 'views_features_new/combined_metadata_ddi_new_modalities.pkl'))
     drug_metadata['view_str'] = 1  # all drugs must have structure (filtered already during preprocessing)
-    mod_avail_df = drug_metadata[['view_str', 'view_kg', 'view_cv'] + [f'view_tx_{cell_line}' for cell_line in CELL_LINES]]
+    mod_avail_df = drug_metadata[[f'view_{mod}' for mod in NON_TX_MODALITIES] + [f'view_tx_{cell_line}' for cell_line in CELL_LINES]]
     pretrain_drugs = mod_avail_df[mod_avail_df.sum(axis=1) >= 2].index.values  # only drugs with at least 2 views are used for pretraining
     
     if 'drugs' in args.split_method:
@@ -390,8 +392,9 @@ def get_train_data(args, logger=None, eval_mode=False):
         if logger is not None:
             logger.info(f'KG input params\nkg_encoder: {full_ckpt_path}\nkg_sampling_num_neighbors: {args.kg_sampling_num_neighbors}\nkg_sampling_num_layers: {args.kg_sampling_num_layers}\n')
     
-    # load drug metadata
+    # load drug metadata  # TODO: New modalities
     drug_metadata = pd.read_pickle(os.path.join(args.path_base, 'views_features_new/combined_metadata_ddi.pkl'))
+    # drug_metadata = pd.read_pickle(os.path.join(args.path_base, 'views_features_new/combined_metadata_ddi_new_modalities.pkl'))
     drug_metadata['view_str'] = 1  # all drugs must have structure (filtered already during preprocessing)
     
     # load all structure modality data
@@ -400,11 +403,15 @@ def get_train_data(args, logger=None, eval_mode=False):
     # load all KG modality data
     all_kg_data = torch.load(os.path.join(args.path_base, f'views_features_new/kg/KG_data_{args.kg_encoder}.pt'), map_location='cpu')
     
-    # load perturbation data
-    cv_df = pd.read_csv(args.path_base + 'views_features_new/cv/cv_cp_data.csv', index_col=0)
-    tx_df = pd.read_csv(args.path_base + 'views_features_new/tx/tx_cp_data_averaged_intermediate.csv', index_col=0)
+    # load tabular drug data
+    assert NON_TX_MODALITIES[0] == "str"
+    assert NON_TX_MODALITIES[1] == "kg"
+    tabular_mod_dfs = {}
+    # NOTE: For additoinal views 
+    for mod in NON_TX_MODALITIES[2:]:
+        tabular_mod_dfs[mod] = pd.read_csv(args.path_base + f"views_features_new/{mod}/{mod}_cp_data.csv", index_col=0)
     
-    # TODO: Add other views 
+    tx_df = pd.read_csv(args.path_base + 'views_features_new/tx/tx_cp_data_averaged_intermediate.csv', index_col=0)
     
     # load label map
     with open(args.path_base + f'polypharmacy_new/{args.data_source}/{args.data_source.lower()}_ddi_directed_final_label_map.pkl', 'rb') as f:
@@ -423,7 +430,7 @@ def get_train_data(args, logger=None, eval_mode=False):
         train_kg_data = all_kg_data
     
     # load collators
-    train_collator, val_collators, test_collators = get_collators(args, drug_metadata, all_molecules, all_kg_data, train_kg_data, cv_df, tx_df, train_dataset.num_labels)
+    train_collator, val_collators, test_collators = get_collators(args, drug_metadata, all_molecules, all_kg_data, train_kg_data, tabular_mod_dfs, tx_df, train_dataset.num_labels)
     
     train_batch_size = len(train_dataset) if args.batch_size is None else args.batch_size  # full batch training; if batched, need to implement negative sampling
     val_batch_sizes = [len(val_dataset) if args.batch_size is None else args.batch_size for val_dataset in val_datasets]  # use -1 so that we can use the same code for both split_by_drugs and split_by_pairs
@@ -464,11 +471,14 @@ def get_all_drugs_data(args, add_specific_drugs=None):
     # load all KG modality data
     all_kg_data = torch.load(os.path.join(args.path_base, f"views_features_new/kg/KG_data_{args.kg_encoder}.pt"), map_location="cpu")
     
-    # load perturbation data
-    cv_df = pd.read_csv(args.path_base + 'views_features_new/cv/cv_cp_data.csv', index_col=0)
+    # load tabular drug data
+    assert NON_TX_MODALITIES[0] == "str"
+    assert NON_TX_MODALITIES[1] == "kg"
+    tabular_mod_dfs = {}
+    # NOTE: For additoinal views 
+    for mod in NON_TX_MODALITIES[2:]:
+        tabular_mod_dfs[mod] = pd.read_csv(args.path_base + f"views_features_new/{mod}/{mod}_cp_data.csv", index_col=0)
     tx_df = pd.read_csv(args.path_base + 'views_features_new/tx/tx_cp_data_averaged_intermediate.csv', index_col=0)
-    
-    # TODO: Add other views here
     
     # load label map
     with open(args.path_base + f'polypharmacy_new/{args.data_source}/{args.data_source.lower()}_ddi_directed_final_label_map.pkl', 'rb') as f:
@@ -479,7 +489,7 @@ def get_all_drugs_data(args, add_specific_drugs=None):
     train_kg_data = all_kg_data
     
     # load collators
-    test_collator = get_collators_all_train(args, drug_metadata, all_molecules, all_kg_data, train_kg_data, cv_df, tx_df, all_drugs_dataset.num_labels)
+    test_collator = get_collators_all_train(args, drug_metadata, all_molecules, all_kg_data, train_kg_data, tabular_mod_dfs, tx_df, all_drugs_dataset.num_labels)
     test_batch_size = len(all_drugs_dataset) if args.batch_size is None else args.batch_size
     test_loader = get_dataloaders_all_train(args, all_drugs_dataset, test_collator, test_batch_size)
     
@@ -514,11 +524,14 @@ def get_train_data_for_all_train(args, logger=None, eval_mode=False):
     # load all KG modality data
     all_kg_data = torch.load(os.path.join(args.path_base, f'views_features_new/kg/KG_data_{args.kg_encoder}.pt'), map_location='cpu')
     
-    # load perturbation data
-    cv_df = pd.read_csv(args.path_base + 'views_features_new/cv/cv_cp_data.csv', index_col=0)
+    # load tabular drug data
+    assert NON_TX_MODALITIES[0] == "str"
+    assert NON_TX_MODALITIES[1] == "kg"
+    tabular_mod_dfs = {}
+    # NOTE: For additoinal views 
+    for mod in NON_TX_MODALITIES[2:]:
+        tabular_mod_dfs[mod] = pd.read_csv(args.path_base + f"views_features_new/{mod}/{mod}_cp_data.csv", index_col=0)
     tx_df = pd.read_csv(args.path_base + 'views_features_new/tx/tx_cp_data_averaged_intermediate.csv', index_col=0)
-    
-    # TODO: Add other views here
     
     # load label map
     with open(args.path_base + f'polypharmacy_new/{args.data_source}/{args.data_source.lower()}_ddi_directed_final_label_map.pkl', 'rb') as f:
@@ -529,7 +542,7 @@ def get_train_data_for_all_train(args, logger=None, eval_mode=False):
     train_kg_data = all_kg_data
 
     # load collators
-    train_collator = get_collators_all_train(args, drug_metadata, all_molecules, all_kg_data, train_kg_data, cv_df, tx_df, train_dataset.num_labels)
+    train_collator = get_collators_all_train(args, drug_metadata, all_molecules, all_kg_data, train_kg_data, tabular_mod_dfs, tx_df, train_dataset.num_labels)
     train_batch_size = len(train_dataset) if args.batch_size is None else args.batch_size  # full batch training; if batched, need to implement negative sampling
     
     train_loader = get_dataloaders_all_train(args, train_dataset, train_collator, train_batch_size)
@@ -551,6 +564,7 @@ class LongDDIDataset(Dataset):
         split: str,
         split_method: str, 
         repeat: str = None,
+        num_base_labels: int = 0,
     ):
         """
         Args:
@@ -565,7 +579,7 @@ class LongDDIDataset(Dataset):
             edgelist_df_fname = f"polypharmacy_new/{data_source}/{split_method}/{split}_df.csv"
         self.edge_df = pd.read_csv(os.path.join(path_base, edgelist_df_fname))
         self.edgelist = self.edge_df[['head', 'tail']].values.tolist()
-        self.labels = self.edge_df['label_indexed'].values.tolist()
+        self.labels = self.edge_df['label_indexed'].values
         self.num_labels = max(self.labels) + 1 if max(self.labels) > 1 else 1
         if self.split in {'val_between', 'test_between'}:
             self.neg_tails_1 = self.edge_df['neg_tail_1'].values.tolist()
@@ -573,6 +587,9 @@ class LongDDIDataset(Dataset):
         else:
             self.neg_heads = self.edge_df['neg_head'].values.tolist()
             self.neg_tails = self.edge_df['neg_tail'].values.tolist()
+            
+        if num_base_labels > 0:
+            self.labels = self.labels + num_base_labels
         
         # NOTE: All those edgelists should be directed by design.
         temp = self.edge_df[['head', 'tail', 'label_indexed']]
@@ -592,7 +609,47 @@ class LongDDIDataset(Dataset):
     
     def __len__(self):
         return len(self.edgelist)
+
+
+class SingleDrugDataset(Dataset):
+    def __init__(
+        self, 
+        path_base: str, 
+        data_source: str,
+        split: str,
+        split_method: str, 
+        repeat: str = None,
+    ):
+        """
+        Args:
+            `path_base`: Path to the directory containing the edgelist. 
+        """
+        single_sides_df = pd.read_csv(os.path.join(path_base, f"single_drug/{data_source}/{split_method}/{split}_df.csv"))
+        
+        # Concatenate the datasets with the specified ratios, ensuring that TWOSIDES is the first one and is 1
+        self.edge_df = single_sides_df.query("label_indexed < 100")
+        self.edgelist = self.edge_df[['head', 'tail']].values.tolist()
+        self.labels = self.edge_df['label_indexed'].tolist()
+        self.num_labels = max(self.labels) + 1 if max(self.labels) > 1 else 1
+        
+        self.neg_heads = self.edge_df['neg_head'].tolist()
+        self.neg_tails = self.edge_df['neg_tail'].tolist()
+        
+        # NOTE: There is no "direction" for single drugs
+        temp = self.edge_df[['head', 'tail', 'label_indexed']]
+        assert pd.concat([temp, temp.rename(columns={'head':'tail', 'tail':'head'})]).drop_duplicates().shape[0] == temp.shape[0]
     
+    def __getitem__(self, index: int):
+        positive_pair = self.edgelist[index]
+        label = self.labels[index]
+        
+        neg_head = self.neg_heads[index]
+        neg_tail = self.neg_tails[index]
+        return positive_pair, label, neg_head, neg_tail
+    
+    def __len__(self):
+        return len(self.edgelist)
+
 
 class LongDDIDatasetAllTrain(Dataset):
     """ Load positive pairs from a long DDI table
@@ -636,7 +693,7 @@ class LongDDIDatasetAllTrain(Dataset):
     def __len__(self):
         return len(self.edgelist)
     
-
+    
 class EvalDDIDataset(Dataset):
     """ Load positive pairs from a long DDI table
     Long so that each row is a pair of drug indices.
@@ -713,7 +770,7 @@ class LongDDIDataCollator:
         all_kg_data: HeteroData,
         kg_sampling_num_neighbors: int,
         kg_sampling_num_layers: int,
-        cv_df: pd.DataFrame,
+        tabular_mod_dfs: pd.DataFrame,
         tx_df: pd.DataFrame,
         num_negative_samples_per_pair: int = None,
         negative_sampling_probs_type: str = 'uniform',
@@ -739,7 +796,7 @@ class LongDDIDataCollator:
         self.str_node_feat_dim = self.all_molecules.node_feature.shape[1]
         
         # load perturbation data
-        self.cv_df = cv_df
+        self.tabular_mod_dfs = tabular_mod_dfs
         self.tx_df = tx_df
         
         # prepare modality masks
@@ -823,8 +880,8 @@ class LongDDIDataCollator:
         all_pos_neg_new = torch.cat([torch.ones_like(positive_labels), torch.zeros_like(negative_labels)])
         
         # extract modality availability
-        unique_head_mod_avail = self.drug_metadata.loc[unique_head_indices][['view_str', 'view_kg', 'view_cv'] + [f'view_tx_{cell_line}' for cell_line in CELL_LINES]]
-        unique_tail_mod_avail = self.drug_metadata.loc[unique_tail_indices][['view_str', 'view_kg', 'view_cv'] + [f'view_tx_{cell_line}' for cell_line in CELL_LINES]]
+        unique_head_mod_avail = self.drug_metadata.loc[unique_head_indices][['view_str', 'view_kg', 'view_cv'] + (["view_bs"] if NUM_NON_TX_MODALITIES >= 4 else []) + [f'view_tx_{cell_line}' for cell_line in CELL_LINES]]
+        unique_tail_mod_avail = self.drug_metadata.loc[unique_tail_indices][['view_str', 'view_kg', 'view_cv'] + (["view_bs"] if NUM_NON_TX_MODALITIES >= 4 else []) + [f'view_tx_{cell_line}' for cell_line in CELL_LINES]]
         
         # extract structure modality (torchdrug mol graphs)
         # NOTE: KG modality is computed via HAN during encoding, by doing message passing across the KG and then         
@@ -843,11 +900,14 @@ class LongDDIDataCollator:
             unique_sig_output[unique_sig_avail_indices, :] = torch.from_numpy(sig_df[unique_sig_ids[unique_sig_avail_indices]].values.T).float()
             unique_sig_output[~unique_sig_avail_indices, :] = 0
             return unique_sig_output
-
-        unique_head_cv_sig_ids = self.drug_metadata.loc[unique_head_indices.tolist(), 'cv_sig_id'].values
-        unique_tail_cv_sig_ids = self.drug_metadata.loc[unique_tail_indices.tolist(), 'cv_sig_id'].values
-        unique_head_cv = get_signatures_and_fill_dummy(unique_head_indices, self.cv_df, unique_head_mod_avail, 'view_cv', unique_head_cv_sig_ids)
-        unique_tail_cv = get_signatures_and_fill_dummy(unique_tail_indices, self.cv_df, unique_tail_mod_avail, 'view_cv', unique_tail_cv_sig_ids)
+        
+        unique_head_tabular_mods = {}
+        unique_tail_tabular_mods = {}
+        for mod in NON_TX_MODALITIES[2:]:
+            unique_head_mod_sig_ids = self.drug_metadata.loc[unique_head_indices.tolist(), f"{mod}_sig_id"].values
+            unique_tail_mod_sig_ids = self.drug_metadata.loc[unique_tail_indices.tolist(), f"{mod}_sig_id"].values
+            unique_head_tabular_mods[mod] = get_signatures_and_fill_dummy(unique_head_indices, self.tabular_mod_dfs[mod], unique_head_mod_avail, f"view_{mod}", unique_head_mod_sig_ids)
+            unique_tail_tabular_mods[mod] = get_signatures_and_fill_dummy(unique_tail_indices, self.tabular_mod_dfs[mod], unique_tail_mod_avail, f"view_{mod}", unique_tail_mod_sig_ids)
         
         unique_head_tx_dict = {}
         unique_tail_tx_dict = {}
@@ -890,7 +950,7 @@ class LongDDIDataCollator:
             'head':{
                 'drugs': unique_head_indices,
                 'strs': unique_head_mol_strs,
-                'cv': unique_head_cv,
+                **unique_head_tabular_mods,
                 'tx': unique_head_tx_dict,
                 'masks': unique_head_masks,
             },
@@ -898,7 +958,7 @@ class LongDDIDataCollator:
             'tail':{
                 'drugs': unique_tail_indices,
                 'strs': unique_tail_mol_strs,
-                'cv': unique_tail_cv,
+                **unique_tail_tabular_mods,
                 'tx': unique_tail_tx_dict,
                 'masks': unique_tail_masks,
             },
@@ -950,6 +1010,388 @@ class LongDDIDataCollator:
             raise NotImplementedError
         
         return negative_edgelist, negative_labels
+
+
+class LongDDIAllDatasetsDataCollator:
+    def __init__(
+        self, 
+        num_labels: int,
+        drug_metadata: pd.DataFrame,
+        all_molecules: PackedMolecule,
+        all_kg_data: HeteroData,
+        kg_sampling_num_neighbors: int,
+        kg_sampling_num_layers: int,
+        tabular_mod_dfs: Dict[str, pd.DataFrame],
+        tx_df: pd.DataFrame,
+        use_single_drug: bool = False,
+    ):
+        """
+        Args:
+            path_base: Path to the directory containing the edgelist and adjmat.
+            split: One of ["train", "val", "test", "val_within", "test_within", "val_between", "test_between"].
+            split_method: One of ["ddi_centric", "drug_centric_hard", "drug_centric_easy"]. 
+            num_negative_samples_per_pair: If None, don't sample negatives on-the-fly. Otherwise, sample this many negatives for each positive pair for the training set (still NO sampling for evaluation sets!). Only implemented for num = 1 and 2. Default is 1 since now we are **not** condensing the undirected edgelist.
+            negative_sampling_probs_type: The type of probability distribution to use for sampling. Choose from ['uniform', 'degree', 'degree_w2v']. (default: `uniform`)
+            device: Device to load the data to.
+        """
+        self.num_labels = num_labels
+        self.all_molecules = all_molecules
+        self.all_kg_data = all_kg_data
+        self.kg_sampling_num_neighbors = kg_sampling_num_neighbors
+        self.kg_sampling_num_layers = kg_sampling_num_layers
+        self.str_node_feat_dim = self.all_molecules.node_feature.shape[1]
+        
+        # load perturbation data
+        self.tabular_mod_dfs = tabular_mod_dfs
+        self.tx_df = tx_df
+        
+        # prepare modality masks
+        self.drug_metadata = drug_metadata
+        
+        self.use_single_drug = use_single_drug
+    
+    def __call__(
+        self, 
+        batch: List[Tuple]
+    ):
+        """
+        Args:
+            batch: A list of tuples of (positive_pair, label, neg_head, neg_tail).
+        """
+        positive_edgelist_ori, positive_labels_ori, neg_heads_ori, neg_tails_ori, edge_sources_ori = zip(*batch)
+        
+        pair_drugs_positive_edgelist = torch.from_numpy(np.array(positive_edgelist_ori)[np.array(edge_sources_ori) != "ONSIDES_OFFSIDES_MERGED"]).long()
+        pair_drugs_positive_labels = torch.from_numpy(np.array(positive_labels_ori)[np.array(edge_sources_ori) != "ONSIDES_OFFSIDES_MERGED"]).long()
+        single_drug_positive_edgelist = torch.from_numpy(np.array(positive_edgelist_ori)[np.array(edge_sources_ori) == "ONSIDES_OFFSIDES_MERGED"]).long()
+        single_drug_positive_labels = torch.from_numpy(np.array(positive_labels_ori)[np.array(edge_sources_ori) == "ONSIDES_OFFSIDES_MERGED"]).long()
+        if not self.use_single_drug:
+            assert single_drug_positive_edgelist.shape[0] == 0
+            assert single_drug_positive_labels.shape[0] == 0
+        
+        pair_drugs_neg_heads = torch.from_numpy(np.array(neg_heads_ori)[np.array(edge_sources_ori) != "ONSIDES_OFFSIDES_MERGED"]).long()
+        pair_drugs_neg_tails = torch.from_numpy(np.array(neg_tails_ori)[np.array(edge_sources_ori) != "ONSIDES_OFFSIDES_MERGED"]).long()
+        if self.use_single_drug:
+            single_drug_neg_heads = torch.from_numpy(np.array(neg_heads_ori)[np.array(edge_sources_ori) == "ONSIDES_OFFSIDES_MERGED"]).long()
+            single_drug_neg_tails = torch.from_numpy(np.array(neg_tails_ori)[np.array(edge_sources_ori) == "ONSIDES_OFFSIDES_MERGED"]).long()
+        
+        pair_drugs_positive_heads = pair_drugs_positive_edgelist[:, 0]
+        pair_drugs_positive_tails = pair_drugs_positive_edgelist[:, 1]
+        
+        # first get negatives
+        pair_drugs_negative_edgelist = torch.cat([
+            torch.stack([pair_drugs_positive_heads, pair_drugs_neg_tails]),
+            torch.stack([pair_drugs_neg_heads, pair_drugs_positive_tails]),
+        ], dim=1).T
+        pair_drugs_negative_labels = pair_drugs_positive_labels.repeat(2)
+        if self.use_single_drug:
+            single_drug_negative_edgelist = torch.cat([
+                torch.stack([single_drug_neg_heads, single_drug_neg_heads]),
+                torch.stack([single_drug_neg_tails, single_drug_neg_tails]),
+            ], dim=1).T  # NOTE: Duplicate drugs for single drugs
+            single_drug_negative_labels = single_drug_positive_labels.repeat(2)
+
+        # NOTE: Concat drug pair and single drug samples
+        positive_edgelist = torch.cat([pair_drugs_positive_edgelist, single_drug_positive_edgelist], dim=0)
+        positive_labels = torch.cat([pair_drugs_positive_labels, single_drug_positive_labels], dim=0)
+        if self.use_single_drug:
+            negative_edgelist = torch.cat([pair_drugs_negative_edgelist, single_drug_negative_edgelist], dim=0)
+            negative_labels = torch.cat([pair_drugs_negative_labels, single_drug_negative_labels], dim=0)
+        else:
+            negative_edgelist = pair_drugs_negative_edgelist
+            negative_labels = pair_drugs_negative_labels
+        
+        pair_drug_edge_sources = np.array(edge_sources_ori)[np.array(edge_sources_ori) != "ONSIDES_OFFSIDES_MERGED"].tolist()
+        if self.use_single_drug:
+            single_drug_edge_sources = np.array(edge_sources_ori)[np.array(edge_sources_ori) == "ONSIDES_OFFSIDES_MERGED"].tolist()
+            positive_edge_sources = pair_drug_edge_sources + single_drug_edge_sources
+            negative_edge_sources = pair_drug_edge_sources * 2 + single_drug_edge_sources * 2
+        else:
+            positive_edge_sources = pair_drug_edge_sources
+            negative_edge_sources = pair_drug_edge_sources * 2
+        
+        # NOTE: Make the edges undirected for training
+        positive_edgelist = torch.cat([positive_edgelist, positive_edgelist.flip(1)], dim=0)
+        negative_edgelist = torch.cat([negative_edgelist, negative_edgelist.flip(1)], dim=0)
+        positive_labels = positive_labels.repeat(2)
+        negative_labels = negative_labels.repeat(2)
+        
+        positive_edge_sources = positive_edge_sources * 2
+        negative_edge_sources = negative_edge_sources * 2
+        edge_sources = positive_edge_sources + negative_edge_sources
+        
+        positive_heads = positive_edgelist[:, 0]
+        positive_tails = positive_edgelist[:, 1]
+        negative_heads = negative_edgelist[:, 0]
+        negative_tails = negative_edgelist[:, 1]
+        
+        # then extract unique indices -- NOTE: We separate out head and tail because we might give head and tail different modality compositions during both training and evaluation. See below for procedure that ensures KG sampling is identical for heads and tails.
+        unique_head_indices, all_heads_new = torch.unique(torch.cat([positive_heads, negative_heads], dim=0), return_inverse=True)
+        unique_tail_indices, all_tails_new = torch.unique(torch.cat([positive_tails, negative_tails], dim=0), return_inverse=True)
+        # positive_heads_new, negative_heads_new = torch.split(all_heads_new, [len(positive_heads), len(negative_heads)])
+        # positive_tails_new, negative_tails_new = torch.split(all_tails_new, [len(positive_tails), len(negative_tails)])
+        all_labels_new = torch.cat([positive_labels, negative_labels])
+        all_pos_neg_new = torch.cat([torch.ones_like(positive_labels), torch.zeros_like(negative_labels)])
+        
+        # extract modality availability
+        unique_head_mod_avail = self.drug_metadata.loc[unique_head_indices][['view_str', 'view_kg', 'view_cv'] + [f'view_tx_{cell_line}' for cell_line in CELL_LINES]]
+        unique_tail_mod_avail = self.drug_metadata.loc[unique_tail_indices][['view_str', 'view_kg', 'view_cv'] + [f'view_tx_{cell_line}' for cell_line in CELL_LINES]]
+        
+        # extract structure modality (torchdrug mol graphs)
+        # NOTE: KG modality is computed via HAN during encoding, by doing message passing across the KG and then         
+        unique_head_mol_strs = self.all_molecules[unique_head_indices.tolist()]
+        unique_tail_mol_strs = self.all_molecules[unique_tail_indices.tolist()]
+        
+        # TODO: As a work-around, generate subgraphs if needed using Neighborloader. Consider replacing with an edge sampler. By default there is no sampling (`kg_sampling_num_neighbors=None`)
+        # NOTE: To ensure KG sampling is identical for the overlapping heads and tails, we first extract the unique indices, then sample the KG. The same subgraph will be fed into the KG encoder for both heads and tails, and the relevant embeddings will be extracted after encoding for heads and tails, respectively.
+        unique_drug_indices = torch.unique(torch.cat([unique_head_indices, unique_tail_indices], dim=0))
+        kg_dict = sample_kg_data(self.all_kg_data, unique_drug_indices, self.kg_sampling_num_neighbors, 'neighborloader', self.kg_sampling_num_layers, drug_only=True)
+        
+        # extract Cv, Tx signatures, fill dummies for unavailable ones
+        def get_signatures_and_fill_dummy(unique_indices, sig_df, unique_mod_avail, sig, unique_sig_ids):
+            unique_sig_output = torch.randn((unique_indices.shape[0], sig_df.shape[0]))
+            unique_sig_avail_indices = unique_mod_avail[sig].values == 1
+            unique_sig_output[unique_sig_avail_indices, :] = torch.from_numpy(sig_df[unique_sig_ids[unique_sig_avail_indices]].values.T).float()
+            unique_sig_output[~unique_sig_avail_indices, :] = 0
+            return unique_sig_output
+
+        unique_head_tabular_mods = {}
+        unique_tail_tabular_mods = {}
+        for mod in NON_TX_MODALITIES[2:]:
+            unique_head_mod_sig_ids = self.drug_metadata.loc[unique_head_indices.tolist(), f"{mod}_sig_id"].values
+            unique_tail_mod_sig_ids = self.drug_metadata.loc[unique_tail_indices.tolist(), f"{mod}_sig_id"].values
+            unique_head_tabular_mods[mod] = get_signatures_and_fill_dummy(unique_head_indices, self.tabular_mod_dfs[mod], unique_head_mod_avail, f"view_{mod}", unique_head_mod_sig_ids)
+            unique_tail_tabular_mods[mod] = get_signatures_and_fill_dummy(unique_tail_indices, self.tabular_mod_dfs[mod], unique_tail_mod_avail, f"view_{mod}", unique_tail_mod_sig_ids)
+        
+        unique_head_tx_dict = {}
+        unique_tail_tx_dict = {}
+        for cell_line in CELL_LINES:
+            unique_head_tx_dict[cell_line] = {}
+            unique_tail_tx_dict[cell_line] = {}
+            
+            # sigs
+            unique_head_tx_cell_line_sig_ids = self.drug_metadata.loc[unique_head_indices.tolist(), f'{cell_line}_max_dose_averaged_sig_id'].values
+            unique_tail_tx_cell_line_sig_ids = self.drug_metadata.loc[unique_tail_indices.tolist(), f'{cell_line}_max_dose_averaged_sig_id'].values
+            unique_head_tx_dict[cell_line]['sigs'] = get_signatures_and_fill_dummy(unique_head_indices, self.tx_df, unique_head_mod_avail, f'view_tx_{cell_line}', unique_head_tx_cell_line_sig_ids)
+            unique_tail_tx_dict[cell_line]['sigs'] = get_signatures_and_fill_dummy(unique_tail_indices, self.tx_df, unique_tail_mod_avail, f'view_tx_{cell_line}', unique_tail_tx_cell_line_sig_ids)
+            
+            # drugs
+            unique_head_tx_dict[cell_line]['drugs'] = unique_head_indices.long()
+            unique_tail_tx_dict[cell_line]['drugs'] = unique_tail_indices.long()
+
+            # dosages
+            unique_head_tx_dosages = self.drug_metadata.loc[unique_head_indices.tolist(), f'{cell_line}_pert_dose'].fillna(0).values
+            unique_tail_tx_dosages = self.drug_metadata.loc[unique_tail_indices.tolist(), f'{cell_line}_pert_dose'].fillna(0).values
+            unique_head_tx_dict[cell_line]['dosages'] = torch.from_numpy(unique_head_tx_dosages).float()
+            unique_tail_tx_dict[cell_line]['dosages'] = torch.from_numpy(unique_tail_tx_dosages).float()
+            
+            # cell_lines (in str, converted to one-hot )
+            unique_head_tx_dict[cell_line]['cell_lines'] = np.array([cell_line] * len(unique_head_indices))
+            unique_tail_tx_dict[cell_line]['cell_lines'] = np.array([cell_line] * len(unique_tail_indices))
+        
+        # NOTE: Instead of using a label matrix, we put all label-specific bilinear decoder weights together into a 3D matrix, and compute for each label all drugs-drugs predictions together (N_drug x feat, feat x feat x num_labels, N_drug x feat), masking the unwanted ones thereafter. This is memory efficient and can be done in a single forward pass.
+        # label_matrix = torch.zeros((len(unique_head_indices), len(unique_tail_indices), self.num_labels), dtype=torch.long) - 100  # dim: (N_drug, N_drug, num_labels)
+        # label_matrix[positive_heads_new, positive_tails_new, positive_labels] = 1
+        # label_matrix[negative_heads_new, negative_tails_new, negative_labels] = 0
+        label_matrix = None
+        
+        # finally, construct the input drug's modality masks: reverse to mod avail, here 1 means NOT having the modality, 0 means having the modality (for the sake of key_padding_mask, thus inverse)
+        unique_head_masks = torch.from_numpy(1 - unique_head_mod_avail.values).bool()
+        unique_tail_masks = torch.from_numpy(1 - unique_tail_mod_avail.values).bool()
+        
+        return {
+            # unique heads
+            'head':{
+                'drugs': unique_head_indices,
+                'strs': unique_head_mol_strs,
+                **unique_head_tabular_mods,
+                'tx': unique_head_tx_dict,
+                'masks': unique_head_masks,
+            },
+            # unique tails
+            'tail':{
+                'drugs': unique_tail_indices,
+                'strs': unique_tail_mol_strs,
+                **unique_tail_tabular_mods,
+                'tx': unique_tail_tx_dict,
+                'masks': unique_tail_masks,
+            },
+            # kg
+            'kg': kg_dict,
+            # used for indexing the label matrix
+            'edge_indices':{
+                'head': all_heads_new,
+                'tail': all_tails_new,
+                'label': all_labels_new,
+                'pos_neg': all_pos_neg_new,
+                'edge_source': edge_sources,
+            },
+        }
+        
+
+class SingleDrugDataCollator:
+    def __init__(
+        self, 
+        num_labels: int,
+        drug_metadata: pd.DataFrame,
+        all_molecules: PackedMolecule,
+        all_kg_data: HeteroData,
+        kg_sampling_num_neighbors: int,
+        kg_sampling_num_layers: int,
+        tabular_mod_dfs: Dict[str, pd.DataFrame],
+        tx_df: pd.DataFrame,
+    ):
+        """
+        Args:
+            path_base: Path to the directory containing the edgelist and adjmat.
+            split: One of ["train", "val", "test", "val_within", "test_within", "val_between", "test_between"].
+            split_method: One of ["ddi_centric", "drug_centric_hard", "drug_centric_easy"]. 
+            num_negative_samples_per_pair: If None, don't sample negatives on-the-fly. Otherwise, sample this many negatives for each positive pair for the training set (still NO sampling for evaluation sets!). Only implemented for num = 1 and 2. Default is 1 since now we are **not** condensing the undirected edgelist.
+            negative_sampling_probs_type: The type of probability distribution to use for sampling. Choose from ['uniform', 'degree', 'degree_w2v']. (default: `uniform`)
+            device: Device to load the data to.
+        """
+        self.num_labels = num_labels
+        self.all_molecules = all_molecules
+        self.all_kg_data = all_kg_data
+        self.kg_sampling_num_neighbors = kg_sampling_num_neighbors
+        self.kg_sampling_num_layers = kg_sampling_num_layers
+        self.str_node_feat_dim = self.all_molecules.node_feature.shape[1]
+        
+        # load perturbation data
+        self.tabular_mod_dfs = tabular_mod_dfs
+        self.tx_df = tx_df
+        
+        # prepare modality masks
+        self.drug_metadata = drug_metadata
+    
+    def __call__(
+        self, 
+        batch: List[Tuple]
+    ):
+        """
+        Args:
+            batch: A list of tuples of (positive_pair, label, neg_head, neg_tail).
+        """
+        single_drug_positive_edgelist, single_drug_positive_labels, single_drug_neg_heads, single_drug_neg_tails = zip(*batch)
+        single_drug_positive_edgelist = torch.tensor(single_drug_positive_edgelist, dtype=torch.long)
+        single_drug_positive_labels = torch.tensor(single_drug_positive_labels, dtype=torch.long)
+        
+        single_drug_negative_edgelist = torch.cat([
+            torch.stack([torch.tensor(single_drug_neg_heads, dtype=torch.long), torch.tensor(single_drug_neg_heads, dtype=torch.long)]),
+            torch.stack([torch.tensor(single_drug_neg_tails, dtype=torch.long), torch.tensor(single_drug_neg_tails, dtype=torch.long)]),
+        ], dim=1).T  # NOTE: Duplicate drugs for single drugs
+        single_drug_negative_labels = single_drug_positive_labels.repeat(2)
+        
+        positive_edgelist = single_drug_positive_edgelist
+        positive_labels = single_drug_positive_labels
+        negative_edgelist = single_drug_negative_edgelist
+        negative_labels = single_drug_negative_labels
+        
+        positive_heads = positive_edgelist[:, 0]
+        positive_tails = positive_edgelist[:, 1]
+        negative_heads = negative_edgelist[:, 0]
+        negative_tails = negative_edgelist[:, 1]
+        
+        # then extract unique indices -- NOTE: We separate out head and tail because we might give head and tail different modality compositions during both training and evaluation. See below for procedure that ensures KG sampling is identical for heads and tails.
+        unique_head_indices, all_heads_new = torch.unique(torch.cat([positive_heads, negative_heads], dim=0), return_inverse=True)
+        unique_tail_indices, all_tails_new = torch.unique(torch.cat([positive_tails, negative_tails], dim=0), return_inverse=True)
+        # positive_heads_new, negative_heads_new = torch.split(all_heads_new, [len(positive_heads), len(negative_heads)])
+        # positive_tails_new, negative_tails_new = torch.split(all_tails_new, [len(positive_tails), len(negative_tails)])
+        all_labels_new = torch.cat([positive_labels, negative_labels])
+        all_pos_neg_new = torch.cat([torch.ones_like(positive_labels), torch.zeros_like(negative_labels)])
+        
+        # extract modality availability
+        unique_head_mod_avail = self.drug_metadata.loc[unique_head_indices][['view_str', 'view_kg', 'view_cv'] + [f'view_tx_{cell_line}' for cell_line in CELL_LINES]]
+        unique_tail_mod_avail = self.drug_metadata.loc[unique_tail_indices][['view_str', 'view_kg', 'view_cv'] + [f'view_tx_{cell_line}' for cell_line in CELL_LINES]]
+        
+        # extract structure modality (torchdrug mol graphs)
+        # NOTE: KG modality is computed via HAN during encoding, by doing message passing across the KG and then         
+        unique_head_mol_strs = self.all_molecules[unique_head_indices.tolist()]
+        unique_tail_mol_strs = self.all_molecules[unique_tail_indices.tolist()]
+        
+        # TODO: As a work-around, generate subgraphs if needed using Neighborloader. Consider replacing with an edge sampler. By default there is no sampling (`kg_sampling_num_neighbors=None`)
+        # NOTE: To ensure KG sampling is identical for the overlapping heads and tails, we first extract the unique indices, then sample the KG. The same subgraph will be fed into the KG encoder for both heads and tails, and the relevant embeddings will be extracted after encoding for heads and tails, respectively.
+        unique_drug_indices = torch.unique(torch.cat([unique_head_indices, unique_tail_indices], dim=0))
+        kg_dict = sample_kg_data(self.all_kg_data, unique_drug_indices, self.kg_sampling_num_neighbors, 'neighborloader', self.kg_sampling_num_layers, drug_only=True)
+        
+        # extract Cv, Tx signatures, fill dummies for unavailable ones
+        def get_signatures_and_fill_dummy(unique_indices, sig_df, unique_mod_avail, sig, unique_sig_ids):
+            unique_sig_output = torch.randn((unique_indices.shape[0], sig_df.shape[0]))
+            unique_sig_avail_indices = unique_mod_avail[sig].values == 1
+            unique_sig_output[unique_sig_avail_indices, :] = torch.from_numpy(sig_df[unique_sig_ids[unique_sig_avail_indices]].values.T).float()
+            unique_sig_output[~unique_sig_avail_indices, :] = 0
+            return unique_sig_output
+
+        unique_head_tabular_mods = {}
+        unique_tail_tabular_mods = {}
+        for mod in NON_TX_MODALITIES[2:]:
+            unique_head_mod_sig_ids = self.drug_metadata.loc[unique_head_indices.tolist(), f"{mod}_sig_id"].values
+            unique_tail_mod_sig_ids = self.drug_metadata.loc[unique_tail_indices.tolist(), f"{mod}_sig_id"].values
+            unique_head_tabular_mods[mod] = get_signatures_and_fill_dummy(unique_head_indices, self.tabular_mod_dfs[mod], unique_head_mod_avail, f"view_{mod}", unique_head_mod_sig_ids)
+            unique_tail_tabular_mods[mod] = get_signatures_and_fill_dummy(unique_tail_indices, self.tabular_mod_dfs[mod], unique_tail_mod_avail, f"view_{mod}", unique_tail_mod_sig_ids)
+        
+        unique_head_tx_dict = {}
+        unique_tail_tx_dict = {}
+        for cell_line in CELL_LINES:
+            unique_head_tx_dict[cell_line] = {}
+            unique_tail_tx_dict[cell_line] = {}
+            
+            # sigs
+            unique_head_tx_cell_line_sig_ids = self.drug_metadata.loc[unique_head_indices.tolist(), f'{cell_line}_max_dose_averaged_sig_id'].values
+            unique_tail_tx_cell_line_sig_ids = self.drug_metadata.loc[unique_tail_indices.tolist(), f'{cell_line}_max_dose_averaged_sig_id'].values
+            unique_head_tx_dict[cell_line]['sigs'] = get_signatures_and_fill_dummy(unique_head_indices, self.tx_df, unique_head_mod_avail, f'view_tx_{cell_line}', unique_head_tx_cell_line_sig_ids)
+            unique_tail_tx_dict[cell_line]['sigs'] = get_signatures_and_fill_dummy(unique_tail_indices, self.tx_df, unique_tail_mod_avail, f'view_tx_{cell_line}', unique_tail_tx_cell_line_sig_ids)
+            
+            # drugs
+            unique_head_tx_dict[cell_line]['drugs'] = unique_head_indices.long()
+            unique_tail_tx_dict[cell_line]['drugs'] = unique_tail_indices.long()
+            
+            # dosages
+            unique_head_tx_dosages = self.drug_metadata.loc[unique_head_indices.tolist(), f'{cell_line}_pert_dose'].fillna(0).values
+            unique_tail_tx_dosages = self.drug_metadata.loc[unique_tail_indices.tolist(), f'{cell_line}_pert_dose'].fillna(0).values
+            unique_head_tx_dict[cell_line]['dosages'] = torch.from_numpy(unique_head_tx_dosages).float()
+            unique_tail_tx_dict[cell_line]['dosages'] = torch.from_numpy(unique_tail_tx_dosages).float()
+            
+            # cell_lines (in str, converted to one-hot )
+            unique_head_tx_dict[cell_line]['cell_lines'] = np.array([cell_line] * len(unique_head_indices))
+            unique_tail_tx_dict[cell_line]['cell_lines'] = np.array([cell_line] * len(unique_tail_indices))
+        
+        # NOTE: Instead of using a label matrix, we put all label-specific bilinear decoder weights together into a 3D matrix, and compute for each label all drugs-drugs predictions together (N_drug x feat, feat x feat x num_labels, N_drug x feat), masking the unwanted ones thereafter. This is memory efficient and can be done in a single forward pass.
+        # label_matrix = torch.zeros((len(unique_head_indices), len(unique_tail_indices), self.num_labels), dtype=torch.long) - 100  # dim: (N_drug, N_drug, num_labels)
+        # label_matrix[positive_heads_new, positive_tails_new, positive_labels] = 1
+        # label_matrix[negative_heads_new, negative_tails_new, negative_labels] = 0
+        label_matrix = None
+        
+        # finally, construct the input drug's modality masks: reverse to mod avail, here 1 means NOT having the modality, 0 means having the modality (for the sake of key_padding_mask, thus inverse)
+        unique_head_masks = torch.from_numpy(1 - unique_head_mod_avail.values).bool()
+        unique_tail_masks = torch.from_numpy(1 - unique_tail_mod_avail.values).bool()
+        
+        return {
+            # unique heads
+            'head':{
+                'drugs': unique_head_indices,
+                'strs': unique_head_mol_strs,
+                **unique_head_tabular_mods,
+                'tx': unique_head_tx_dict,
+                'masks': unique_head_masks,
+            },
+            # unique tails
+            'tail':{
+                'drugs': unique_tail_indices,
+                'strs': unique_tail_mol_strs,
+                **unique_tail_tabular_mods,
+                'tx': unique_tail_tx_dict,
+                'masks': unique_tail_masks,
+            },
+            # kg
+            'kg': kg_dict,
+            # used for indexing the label matrix
+            'edge_indices':{
+                'head': all_heads_new,
+                'tail': all_tails_new,
+                'label': all_labels_new,
+                'pos_neg': all_pos_neg_new,
+            },
+        }
     
 
 # ################################################################
@@ -976,7 +1418,9 @@ class DrugCLCollator:
     ):
         self.kg_sampling_num_neighbors = kg_sampling_num_neighbors
         self.kg_sampling_num_layers = kg_sampling_num_layers
+        # TODO: New modalities
         drug_metadata = pd.read_pickle(os.path.join(path_base, 'views_features_new/combined_metadata_ddi.pkl'))
+        # drug_metadata = pd.read_pickle(os.path.join(path_base, 'views_features_new/combined_metadata_ddi_new_modalities.pkl'))
         
         # Get KG and structure data
         all_kg_data = torch.load(os.path.join(path_base, f"views_features_new/kg/KG_data_{kg_encoder}.pt"), map_location="cpu")
@@ -988,8 +1432,14 @@ class DrugCLCollator:
         else:
             self.kg_data = all_kg_data
         
-        # load perturbation data
-        cv_df = pd.read_csv(path_base + 'views_features_new/cv/cv_cp_data.csv', index_col=0)
+        # load tabular drug data
+        assert NON_TX_MODALITIES[0] == "str"
+        assert NON_TX_MODALITIES[1] == "kg"
+        tabular_mod_dfs = {}
+        # NOTE: For additoinal views 
+        for mod in NON_TX_MODALITIES[2:]:
+            tabular_mod_dfs[mod] = pd.read_csv(path_base + f"views_features_new/{mod}/{mod}_cp_data.csv", index_col=0)
+
         tx_df = pd.read_csv(path_base + 'views_features_new/tx/tx_cp_data_averaged_intermediate.csv', index_col=0)
         
         # create tensors for each perturbation modality, filling in missing samples with dummy 0 (should be masked by masks in the model)
@@ -1003,8 +1453,10 @@ class DrugCLCollator:
             unique_sig_output[~unique_sig_avail_indices, :] = 0  # NOTE: Can remove this line so that dummies are random Gaussian
             return unique_sig_output
         
-        cv_sig_ids = drug_metadata['cv_sig_id'].values
-        self.cv_store = get_signatures_and_fill_dummy(torch.arange(drug_metadata.shape[0]), cv_df, mod_avail_df, 'view_cv', cv_sig_ids)
+        self.tabular_mod_stores = {}
+        for mod in NON_TX_MODALITIES[2:]:
+            mod_sig_ids = drug_metadata[f"{mod}_sig_id"].values
+            self.tabular_mod_stores[mod] = get_signatures_and_fill_dummy(drug_metadata, tabular_mod_dfs[mod], mod_avail_df, f'view_{mod}', mod_sig_ids)
         
         self.tx_store_dict = {}
         for cell_line in CELL_LINES:
@@ -1038,13 +1490,13 @@ class DrugCLCollator:
         
         kg_dict = sample_kg_data(self.kg_data, batch_drug_indices, self.kg_sampling_num_neighbors, 'neighborloader', self.kg_sampling_num_layers, drug_only=True)
         
+        out_views = (self.all_molecules[batch_drug_indices.tolist()], kg_dict, )
+        for mod in NON_TX_MODALITIES[2:]:
+            out_views += (self.tabular_mod_stores[mod][batch_drug_indices.tolist()], )
+        out_views += ({cell_line : {k: v[batch_drug_indices.tolist()] for k, v in tx_store.items()} for cell_line, tx_store in self.tx_store_dict.items()}, )
+        
         return (
             batch_drug_indices,
-            (
-                self.all_molecules[batch_drug_indices.tolist()],
-                kg_dict,
-                self.cv_store[batch_drug_indices.tolist()],
-                {cell_line : {k: v[batch_drug_indices.tolist()] for k, v in tx_store.items()} for cell_line, tx_store in self.tx_store_dict.items()},
-            ),
+            out_views,
         )
 

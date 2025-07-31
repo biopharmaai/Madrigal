@@ -1,4 +1,5 @@
 from itertools import combinations
+from re import M
 from typing import List, Union, Dict
 import numpy as np
 import pandas as pd
@@ -11,10 +12,11 @@ from torchdrug.data import PackedMolecule
 
 from .GeomCA import GeomCA
 from .metrics import get_metrics
-from ..utils import from_indices_to_tensor, to_device, NUM_MODALITIES
+from ..utils import NUM_NON_TX_MODALITIES, from_indices_to_tensor, to_device, NUM_MODALITIES
 from .eval_utils import (
     AVERAGE, 
-    KEY_METRIC_DICT, 
+    KEY_METRIC_DICT,
+    MODALITY2NUMBER_LIST, 
     NUMBER2MODALITY, 
     FINETUNE_MODE_MODEL_SELECTION_EVAL_TYPE_MAP, 
     FINETUNE_MODE_MODEL_SELECTION_EVAL_TYPE_BETWEEN_MAP, 
@@ -37,9 +39,10 @@ SEED = 42
 def evaluate_ft(model, batch, loss_fn, k, task, split, finetune_mode, best_metrics, subgroup=False, verbose=True, device='cpu', logger=None, wandb=None, epoch=None, **kwargs):
     """ Wrapper for `evaluate_ddi`
     """
-    save_scores = kwargs.get('save_scores', False)
-    output_dir = kwargs.get('output_dir', None)
-    label_map = kwargs.get('label_map', None)
+    save_scores = kwargs.pop('save_scores', False)
+    output_dir = kwargs.pop('output_dir', None)
+    label_map = kwargs.pop('label_map', None)
+    data_source = kwargs.pop("data_source", "")
     assert (not save_scores) or (output_dir is not None and label_map is not None)
     assert (not save_scores) or (AVERAGE in {'micro', 'macro'})
     
@@ -70,23 +73,25 @@ def evaluate_ft(model, batch, loss_fn, k, task, split, finetune_mode, best_metri
         else:
             eval_type_for_model_selection = FINETUNE_MODE_MODEL_SELECTION_EVAL_TYPE_MAP[finetune_mode]
         
+        if "ONSIDES" in data_source: eval_type_for_model_selection = "full_full"
+        
         split_eval_types = {
             'train': [
                 'full_full', 'str_str', 'str_full', 
-                # 'kg_kg', 'cv_cv', 'tx_tx', 
+                'kg_kg', 'cv_cv', 'tx_tx', 
                 'str+kg_full', 'str+cv_full', 'str+tx_full', 'str+cv+tx_full',
                 # 'str+kg_str+kg', 'str+cv_str+cv', 
                 'str+tx_str+tx', 'str+cv+tx_str+cv+tx',
             ],
             'val': [
-                'full_full', 'str_str', 'str_full', 
+                'full_full', 'str_str', 
                 # 'kg_kg', 'cv_cv', 'tx_tx', 
                 # 'str+kg_full', 'str+cv_full', 'str+tx_full', 'str+cv+tx_full',
                 # 'str+kg_str+kg', 'str+cv_str+cv', 
                 'str+tx_str+tx', 'str+cv+tx_str+cv+tx',
             ],
             'test': [
-                'full_full', 'str_str', 'str_full', 
+                'full_full', 'str_str', 
                 # 'kg_kg', 'cv_cv', 'tx_tx', 
                 # 'str+kg_full', 'str+cv_full', 'str+tx_full', 'str+cv+tx_full',
                 # 'str+kg_str+kg', 'str+cv_str+cv', 
@@ -94,41 +99,43 @@ def evaluate_ft(model, batch, loss_fn, k, task, split, finetune_mode, best_metri
             ],
             'between': [
                 'full_full', 'str_str', 'str_full', 
-                # 'kg_kg', 'cv_cv', 'tx_tx', 
-                'str+kg_full', 'str+cv_full', 'str+tx_full', 'str+cv+tx_full'
-            ],
+                'kg_kg', 'cv_cv', 'tx_tx', 
+                # 'str+kg_full', 
+                'str+cv_full', 'str+tx_full', 'str+cv+tx_full',
+            ] + (["str+bs_full", "str+cv+bs_full", "str+bs+tx_full", "str+cv+bs+tx_full"] if NUM_NON_TX_MODALITIES >= 4 else []),
             'within': [
                 'full_full', 'str_str', 
-                # 'kg_kg', 'cv_cv', 'tx_tx', 
-                'str+kg_str+kg', 'str+cv_str+cv', 'str+tx_str+tx', 'str+cv+tx_str+cv+tx'
+                'kg_kg', 'cv_cv', 'tx_tx', 
+                # 'str+kg_str+kg', 
+                'str+cv_str+cv', 'str+tx_str+tx', 'str+cv+tx_str+cv+tx'
             ],
         }
         
         for eval_type in split_eval_types[split.split('_')[-1]]:
             if eval_type != eval_type_for_model_selection:
-                evaluate_ddi(model, batch_head, batch_tail, batch_kg, head_masks_base, tail_masks_base, ddi_head_indices, ddi_tail_indices, ddi_labels, ddi_pos_neg_samples, loss_fn, k, task, eval_type=eval_type, split=split, finetune_mode=finetune_mode, best_metrics=best_metrics, subgroup=subgroup, verbose=verbose, device=device, logger=logger, wandb=wandb, epoch=epoch, save_scores=save_scores, output_dir=output_dir, label_map=label_map)
+                evaluate_ddi(model, batch_head, batch_tail, batch_kg, head_masks_base, tail_masks_base, ddi_head_indices, ddi_tail_indices, ddi_labels, ddi_pos_neg_samples, loss_fn, k, task, eval_type=eval_type, split=split, finetune_mode=finetune_mode, best_metrics=best_metrics, subgroup=subgroup, verbose=verbose, device=device, logger=logger, wandb=wandb, epoch=epoch, save_scores=save_scores, output_dir=output_dir, label_map=label_map, data_source=data_source, **kwargs)
             else:
-                key_metric = evaluate_ddi(model, batch_head, batch_tail, batch_kg, head_masks_base, tail_masks_base, ddi_head_indices, ddi_tail_indices, ddi_labels, ddi_pos_neg_samples, loss_fn, k, task, eval_type=eval_type, split=split, finetune_mode=finetune_mode, best_metrics=best_metrics, subgroup=subgroup, verbose=verbose, device=device, logger=logger, wandb=wandb, epoch=epoch, save_scores=save_scores, output_dir=output_dir, label_map=label_map)
+                key_metric = evaluate_ddi(model, batch_head, batch_tail, batch_kg, head_masks_base, tail_masks_base, ddi_head_indices, ddi_tail_indices, ddi_labels, ddi_pos_neg_samples, loss_fn, k, task, eval_type=eval_type, split=split, finetune_mode=finetune_mode, best_metrics=best_metrics, subgroup=subgroup, verbose=verbose, device=device, logger=logger, wandb=wandb, epoch=epoch, save_scores=save_scores, output_dir=output_dir, label_map=label_map, data_source=data_source, **kwargs)
     
-    elif split in {'val_between_easy', 'test_between_easy'}:
-        eval_type_for_model_selection = FINETUNE_MODE_MODEL_SELECTION_EVAL_TYPE_BETWEEN_MAP[finetune_mode]
-        for eval_type in [
-            'str_str', 'str_full', 'kg_full', 'cv_full', 'tx_full', 'str+kg_full', 'str+cv_full', 'str+tx_full', 'str+kg+cv_full', 'str+kg+tx_full', 'str+cv+tx_full', 'str+kg+cv+tx_full', 'full_full'
-        ]:
-            if eval_type != eval_type_for_model_selection:
-                evaluate_ddi(model, batch_head, batch_tail, batch_kg, head_masks_base, tail_masks_base, ddi_head_indices, ddi_tail_indices, ddi_labels, ddi_pos_neg_samples, loss_fn, k, task, eval_type=eval_type, split=split, finetune_mode=finetune_mode, best_metrics=best_metrics, subgroup=subgroup, verbose=verbose, device=device, logger=logger, wandb=wandb, epoch=epoch, save_scores=save_scores, output_dir=output_dir, label_map=label_map)
-            else:
-                key_metric = evaluate_ddi(model, batch_head, batch_tail, batch_kg, head_masks_base, tail_masks_base, ddi_head_indices, ddi_tail_indices, ddi_labels, ddi_pos_neg_samples, loss_fn, k, task, eval_type=eval_type, split=split, finetune_mode=finetune_mode, best_metrics=best_metrics, subgroup=subgroup, verbose=verbose, device=device, logger=logger, wandb=wandb, epoch=epoch, save_scores=save_scores, output_dir=output_dir, label_map=label_map)
+    # elif split in {'val_between_easy', 'test_between_easy'}:
+    #     eval_type_for_model_selection = FINETUNE_MODE_MODEL_SELECTION_EVAL_TYPE_BETWEEN_MAP[finetune_mode]
+    #     for eval_type in [
+    #         'str_str', 'str_full', 'kg_full', 'cv_full', 'tx_full', 'str+kg_full', 'str+cv_full', 'str+tx_full', 'str+kg+cv_full', 'str+kg+tx_full', 'str+cv+tx_full', 'str+kg+cv+tx_full', 'full_full'
+    #     ]:
+    #         if eval_type != eval_type_for_model_selection:
+    #             evaluate_ddi(model, batch_head, batch_tail, batch_kg, head_masks_base, tail_masks_base, ddi_head_indices, ddi_tail_indices, ddi_labels, ddi_pos_neg_samples, loss_fn, k, task, eval_type=eval_type, split=split, finetune_mode=finetune_mode, best_metrics=best_metrics, subgroup=subgroup, verbose=verbose, device=device, logger=logger, wandb=wandb, epoch=epoch, save_scores=save_scores, output_dir=output_dir, label_map=label_map, **kwargs)
+    #         else:
+    #             key_metric = evaluate_ddi(model, batch_head, batch_tail, batch_kg, head_masks_base, tail_masks_base, ddi_head_indices, ddi_tail_indices, ddi_labels, ddi_pos_neg_samples, loss_fn, k, task, eval_type=eval_type, split=split, finetune_mode=finetune_mode, best_metrics=best_metrics, subgroup=subgroup, verbose=verbose, device=device, logger=logger, wandb=wandb, epoch=epoch, save_scores=save_scores, output_dir=output_dir, label_map=label_map, **kwargs)
 
-    elif split in {'val_within_easy', 'test_within_easy'}:
-        eval_type_for_model_selection = FINETUNE_MODE_MODEL_SELECTION_EVAL_TYPE_WITHIN_MAP[finetune_mode]
-        for eval_type in [
-            'str_str', 'kg_kg', 'cv_cv', 'tx_tx', 'str+kg_str+kg', 'str+cv_str+cv', 'str+tx_str+tx', 'str+kg+cv_str+kg+cv', 'str+kg+tx_str+kg+tx', 'str+cv+tx_str+cv+tx', 'str+kg+cv+tx_str+kg+cv+tx'
-        ]:
-            if eval_type != eval_type_for_model_selection:
-                evaluate_ddi(model, batch_head, batch_tail, batch_kg, head_masks_base, tail_masks_base, ddi_head_indices, ddi_tail_indices, ddi_labels, ddi_pos_neg_samples, loss_fn, k, task, eval_type=eval_type, split=split, finetune_mode=finetune_mode, best_metrics=best_metrics, subgroup=subgroup, verbose=verbose, device=device, logger=logger, wandb=wandb, epoch=epoch, save_scores=save_scores, output_dir=output_dir, label_map=label_map)
-            else:
-                key_metric = evaluate_ddi(model, batch_head, batch_tail, batch_kg, head_masks_base, tail_masks_base, ddi_head_indices, ddi_tail_indices, ddi_labels, ddi_pos_neg_samples, loss_fn, k, task, eval_type=eval_type, split=split, finetune_mode=finetune_mode, best_metrics=best_metrics, subgroup=subgroup, verbose=verbose, device=device, logger=logger, wandb=wandb, epoch=epoch, save_scores=save_scores, output_dir=output_dir, label_map=label_map)
+    # elif split in {'val_within_easy', 'test_within_easy'}:
+    #     eval_type_for_model_selection = FINETUNE_MODE_MODEL_SELECTION_EVAL_TYPE_WITHIN_MAP[finetune_mode]
+    #     for eval_type in [
+    #         'str_str', 'kg_kg', 'cv_cv', 'tx_tx', 'str+kg_str+kg', 'str+cv_str+cv', 'str+tx_str+tx', 'str+kg+cv_str+kg+cv', 'str+kg+tx_str+kg+tx', 'str+cv+tx_str+cv+tx', 'str+kg+cv+tx_str+kg+cv+tx'
+    #     ]:
+    #         if eval_type != eval_type_for_model_selection:
+    #             evaluate_ddi(model, batch_head, batch_tail, batch_kg, head_masks_base, tail_masks_base, ddi_head_indices, ddi_tail_indices, ddi_labels, ddi_pos_neg_samples, loss_fn, k, task, eval_type=eval_type, split=split, finetune_mode=finetune_mode, best_metrics=best_metrics, subgroup=subgroup, verbose=verbose, device=device, logger=logger, wandb=wandb, epoch=epoch, save_scores=save_scores, output_dir=output_dir, label_map=label_map, **kwargs)
+    #         else:
+    #             key_metric = evaluate_ddi(model, batch_head, batch_tail, batch_kg, head_masks_base, tail_masks_base, ddi_head_indices, ddi_tail_indices, ddi_labels, ddi_pos_neg_samples, loss_fn, k, task, eval_type=eval_type, split=split, finetune_mode=finetune_mode, best_metrics=best_metrics, subgroup=subgroup, verbose=verbose, device=device, logger=logger, wandb=wandb, epoch=epoch, save_scores=save_scores, output_dir=output_dir, label_map=label_map, **kwargs)
 
     else:
         raise ValueError('`split` must be either "train", "val", "test", "val_between", "val_within", "val_between_easy", "val_within_easy", "test_between", "test_within", "test_between_easy", or "test_within_easy".')
@@ -146,6 +153,7 @@ def evaluate_ddi(model, batch_head, batch_tail, batch_kg, head_masks_base, tail_
     save_scores = kwargs.get('save_scores', False)
     output_dir = kwargs.get('output_dir', None)
     label_map = kwargs.get('label_map', None)
+    data_source = kwargs.get("data_source", "")
     
     masks_head, masks_tail = get_evaluate_masks(head_masks_base, tail_masks_base, eval_type, finetune_mode, device)
     
@@ -180,13 +188,14 @@ def evaluate_ddi(model, batch_head, batch_tail, batch_kg, head_masks_base, tail_
     elif split in {'val_between', 'val_between_easy', 'test_between', 'test_between_easy'}:
         pass
     
-    pred_ddis = torch.sigmoid(model(batch_head, batch_tail, to_device(masks_head, device), to_device(masks_tail, device), batch_kg)).detach().cpu()
-    pred_ddis = pred_ddis[ddi_labels, ddi_head_indices, ddi_tail_indices]  # in place to reduce GPU memory cost
-    true_ddis = ddi_pos_neg_samples
-    loss = loss_fn(pred_ddis, true_ddis).item()
+    pred_ddis = torch.sigmoid(model(batch_head, batch_tail, to_device(masks_head, device), to_device(masks_tail, device), batch_kg, single_drug="ONSIDES" in data_source)).detach().cpu()
+    if "ONSIDES" in data_source: 
+        pred_ddis = pred_ddis[ddi_head_indices, ddi_labels]
+    else:
+        pred_ddis = pred_ddis[ddi_labels, ddi_head_indices, ddi_tail_indices]
+    loss = loss_fn(pred_ddis, ddi_pos_neg_samples).item()
     
     logger.info(f'Evaluated for {task} classification task on {split} set with {eval_type} eval_type.')
-    logger.info(f'loss: {loss:.4f}')
     
     # Now get metrics
     average = AVERAGE
@@ -194,7 +203,7 @@ def evaluate_ddi(model, batch_head, batch_tail, batch_kg, head_masks_base, tail_
     
     metrics_dict, pos_samples = get_metrics(
         pred_ddis.numpy(), 
-        true_ddis.numpy(), 
+        ddi_pos_neg_samples.numpy(), 
         ddi_labels.numpy(), 
         k=k, 
         task=task,
@@ -215,24 +224,25 @@ def evaluate_ddi(model, batch_head, batch_tail, batch_kg, head_masks_base, tail_
         metrics_str = ', '.join([f'{metric_name}: {metric:.4f}' for metric_name, metric in metrics_dict.items()])
         logger.info(f'{average}-averaged metrics: {metrics_str}')
     
-    wandb.log({f'{split}_{eval_type}_loss': loss}, step=epoch)
-    wandb.log({f'{split}_{eval_type}_{metric_name}': metric for metric_name, metric in metrics_dict.items()}, step=epoch)
+    logger.info(f"{data_source}{split}_{eval_type}_loss: {loss:.4f}")
+    wandb.log({f'{data_source}{split}_{eval_type}_loss': loss}, step=epoch)
+    wandb.log({f'{data_source}{split}_{eval_type}_{metric_name}': metric if metric == metric else 0 for metric_name, metric in metrics_dict.items()}, step=epoch)
         
     key_metric_name = KEY_METRIC_DICT[task]
     assert key_metric_name in metrics_dict.keys()
     key_metric = metrics_dict[key_metric_name]
-    if best_metrics is not None and (f'best_{split}_{eval_type}_{key_metric_name}' not in best_metrics.keys() or key_metric > best_metrics[f'best_{split}_{eval_type}_{key_metric_name}']):
+    if best_metrics is not None and (f'{data_source}best_{split}_{eval_type}_{key_metric_name}' not in best_metrics.keys() or key_metric > best_metrics[f'{data_source}best_{split}_{eval_type}_{key_metric_name}']):
         # NOTE: the "best" metrics are recorded with respect to each eval_type individually, e.g. the epoch that best metrics are recorded for val "str_full" will definitely be different from that of val "full_full"
         for metric_name, metric in metrics_dict.items():
-            best_metrics[f'best_{split}_{eval_type}_{metric_name}'] = metric
+            best_metrics[f'{data_source}best_{split}_{eval_type}_{metric_name}'] = metric
                 
-    if save_scores:
-        scores_df = pd.DataFrame.from_dict({'pred_score':pred_ddis.numpy(), 'pos_neg':true_ddis.numpy(), 'label':ddi_labels.numpy(), 'head_index':ddi_head_indices.numpy(), 'tail_index':ddi_tail_indices}, orient='columns')
-        scores_df.to_csv(output_dir + f'{split}_{eval_type}_{finetune_mode}_scores.csv', index=False)
-        raw_metrics_df = pd.DataFrame.from_dict(raw_metrics_dict, orient='columns')
-        raw_metrics_df['pos_samples'] = pos_samples.astype(int)
-        raw_metrics_df['label'] = label_map[ddi_labels.unique().tolist()]
-        raw_metrics_df.to_csv(output_dir + f'{split}_{eval_type}_{finetune_mode}_label_stratified_metrics.csv', index=False)
+    # if save_scores:
+    #     scores_df = pd.DataFrame.from_dict({'pred_score':pred_ddis.numpy(), 'pos_neg':true_ddis.numpy(), 'label':ddi_labels.numpy(), 'head_index':ddi_head_indices.numpy(), 'tail_index':ddi_tail_indices}, orient='columns')
+    #     scores_df.to_csv(output_dir + f'{split}_{eval_type}_{finetune_mode}_scores.csv', index=False)
+    #     raw_metrics_df = pd.DataFrame.from_dict(raw_metrics_dict, orient='columns')
+    #     raw_metrics_df['pos_samples'] = pos_samples.astype(int)
+    #     raw_metrics_df['label'] = label_map[ddi_labels.unique().tolist()]
+    #     raw_metrics_df.to_csv(output_dir + f'{split}_{eval_type}_{finetune_mode}_label_stratified_metrics.csv', index=False)
         
     return key_metric
 
@@ -245,22 +255,21 @@ def evaluate_pt(model, drugs, masks, too_hard_neg_mask, collator, split, wandb, 
     """ Wrapper for `evaluate_pretrain` across subset pair combinations
     """
     # TODO: Make evaluation more efficient by first encoding everything and then doing pairwise comparisons
-    str_kg_ret_metrics = evaluate_pretrain_subsets(model, drugs, masks, too_hard_neg_mask, collator, [0], [1], device)
-    str_cv_ret_metrics = evaluate_pretrain_subsets(model, drugs, masks, too_hard_neg_mask, collator, [0], [2], device)
-    kg_cv_ret_metrics = evaluate_pretrain_subsets(model, drugs, masks, too_hard_neg_mask, collator, [1], [2], device)
-    str_tx_mcf7_ret_metrics = evaluate_pretrain_subsets(model, drugs, masks, too_hard_neg_mask, collator, [0], [13], device)
-    str_tx_pc3_ret_metrics = evaluate_pretrain_subsets(model, drugs, masks, too_hard_neg_mask, collator, [0], [15], device)
-    str_tx_vcap_ret_metrics = evaluate_pretrain_subsets(model, drugs, masks, too_hard_neg_mask, collator, [0], [17], device)
+    str_kg_ret_metrics = evaluate_pretrain_subsets(model, drugs, masks, too_hard_neg_mask, collator, MODALITY2NUMBER_LIST["str"], MODALITY2NUMBER_LIST["kg"], device)
+    str_cv_ret_metrics = evaluate_pretrain_subsets(model, drugs, masks, too_hard_neg_mask, collator, MODALITY2NUMBER_LIST["str"], MODALITY2NUMBER_LIST["cv"], device)
+    if NUM_NON_TX_MODALITIES > 3:
+        str_bs_ret_metrics = evaluate_pretrain_subsets(model, drugs, masks, too_hard_neg_mask, collator, MODALITY2NUMBER_LIST["str"], MODALITY2NUMBER_LIST["bs"], device)
+    str_tx_mcf7_ret_metrics = evaluate_pretrain_subsets(model, drugs, masks, too_hard_neg_mask, collator, MODALITY2NUMBER_LIST["str"], MODALITY2NUMBER_LIST["tx_mcf7"], device)
+    str_tx_pc3_ret_metrics = evaluate_pretrain_subsets(model, drugs, masks, too_hard_neg_mask, collator, MODALITY2NUMBER_LIST["str"], MODALITY2NUMBER_LIST["tx_pc3"], device)
+    str_tx_vcap_ret_metrics = evaluate_pretrain_subsets(model, drugs, masks, too_hard_neg_mask, collator, MODALITY2NUMBER_LIST["str"], MODALITY2NUMBER_LIST["tx_vcap"], device)
     
     logger.info('Start logging topk, foscttm, and loss metrics...')
     report_dict = {}
-    for comp_pair, metrics in zip([
-        'str v kg', 'str v cv', 'kg v cv', 
-        'str v tx_mcf7', 'str v tx_pc3', 'str v tx_vcap', 
-    ], [
-        str_kg_ret_metrics, str_cv_ret_metrics, kg_cv_ret_metrics, 
-        str_tx_mcf7_ret_metrics, str_tx_pc3_ret_metrics, str_tx_vcap_ret_metrics, 
-    ]):
+    for comp_pair, metrics in zip(
+        ['str v kg', 'str v cv'] + (['str v bs'] if NUM_NON_TX_MODALITIES > 3 else []) + [ 
+        'str v tx_mcf7', 'str v tx_pc3', 'str v tx_vcap'], 
+        [str_kg_ret_metrics, str_cv_ret_metrics] + ([str_bs_ret_metrics] if NUM_NON_TX_MODALITIES > 3 else []) + [str_tx_mcf7_ret_metrics, str_tx_pc3_ret_metrics, str_tx_vcap_ret_metrics]
+    ):
         logger.info(len(metrics))
         metrics = iter(metrics)
         count = 0
@@ -279,15 +288,25 @@ def evaluate_pt(model, drugs, masks, too_hard_neg_mask, collator, split, wandb, 
     # Uniformity metrics
     logger.info('Start logging uniformity metrics...')
     all_embeds = {}
-    for mod in [0,1,2,13,15,17]:  # str, kg, cv, mcf7, pc3, vcap
+    for mod in sum([
+        MODALITY2NUMBER_LIST[mod] for mod in 
+        ['str', 'kg', 'cv'] + (["bs"] if NUM_NON_TX_MODALITIES > 3 else []) + ['tx_mcf7', 'tx_pc3', 'tx_vcap']
+    ], start=[]):
+    # [0,1,2,13,15,17]:  # str, kg, cv, mcf7, pc3, vcap
         valid_drugs = drugs[(1 - masks[drugs, :][:, [mod]]).sum(axis=1) == 1]  # Get valid drugs that have the required modalities
         valid_drugs, valid_data = to_device(collator([valid_drugs]), device)
-        valid_mols, valid_kgs, valid_cvs, valid_tx_all_cell_lines = valid_data
+        if NUM_NON_TX_MODALITIES == 3:
+            valid_mols, valid_kgs, valid_cvs, valid_tx_all_cell_lines = valid_data
+            other_tabular_mod_data = {}
+        else:
+            valid_mols, valid_kgs, valid_cvs, valid_bs, valid_tx_all_cell_lines = valid_data
+            other_tabular_mod_data = {"bs": valid_bs}
         masks_subset = to_device(from_indices_to_tensor([mod], masks.shape[1]).repeat(valid_drugs.shape[0], 1).bool(), device)
-        embeds = model.base_encoder(valid_drugs, masks_subset, valid_mols, valid_kgs, valid_cvs, valid_tx_all_cell_lines, raw_encoder_output=model.raw_encoder_output).cpu()
+        embeds = model.base_encoder(valid_drugs, masks_subset, valid_mols, valid_kgs, valid_cvs, valid_tx_all_cell_lines, raw_encoder_output=model.raw_encoder_output, **other_tabular_mod_data).cpu()
         uniform_l = uniform_loss(embeds)
 
-        indices_str = ''.join(np.array([mod]).astype(str))
+        indices_str = str(mod)
+        # indices_str = ''.join(np.array([mod]).astype(str))
         wandb.log({f'{split} uniformity loss {NUMBER2MODALITY[indices_str]}': uniform_l}, step=epoch)
         logger.info(f'{split} uniformity loss {NUMBER2MODALITY[indices_str]}: {uniform_l}')
 
@@ -296,7 +315,8 @@ def evaluate_pt(model, drugs, masks, too_hard_neg_mask, collator, split, wandb, 
         all_embeds[indices_str]['drugs'] = valid_drugs.detach().cpu().numpy()
     
     logger.info('Start logging alignment metrics...')
-    for mod1, mod2 in [(0, 1), (0, 2), (1, 2), (0, 13), (0, 15), (0, 17)]:
+    for mod1, mod2 in [(0, i) for i in list(range(1, NUM_NON_TX_MODALITIES)) + MODALITY2NUMBER_LIST['tx_mcf7'] + MODALITY2NUMBER_LIST['tx_pc3'] + MODALITY2NUMBER_LIST['tx_vcap']]:
+    # [(0, 1), (0, 2), (1, 2), (0, 13), (0, 15), (0, 17)]:
         mod_pair_str = NUMBER2MODALITY[str(mod1)] + ' v ' + NUMBER2MODALITY[str(mod2)]
         
         # NOTE: Need to ensure the extracted embeddings are aligned
@@ -345,13 +365,18 @@ def evaluate_pretrain_subsets(model: nn.Module, drugs: np.ndarray, masks: np.nda
     # TODO: Work-around
     valid_drugs = torch.from_numpy(np.random.choice(valid_drugs, size=min(1000, valid_drugs.shape[0]), replace=False))
     _, valid_data = to_device(collator([valid_drugs]), device)
-    valid_mols, valid_kgs, valid_cvs, valid_tx_all_cell_lines = valid_data
+    if NUM_NON_TX_MODALITIES == 3:
+        valid_mols, valid_kgs, valid_cvs, valid_tx_all_cell_lines = valid_data
+        other_tabular_mod_data = {}
+    else:
+        valid_mols, valid_kgs, valid_cvs, valid_bs, valid_tx_all_cell_lines = valid_data
+        other_tabular_mod_data = {"bs": valid_bs}
     
     masks1 = to_device(from_indices_to_tensor(subset1, masks.shape[1]).repeat(valid_drugs.shape[0], 1).bool(), device)
     masks2 = to_device(from_indices_to_tensor(subset2, masks.shape[1]).repeat(valid_drugs.shape[0], 1).bool(), device)
 
-    embeds1 = model.base_encoder(valid_drugs.to(device), masks1, valid_mols, valid_kgs, valid_cvs, valid_tx_all_cell_lines, raw_encoder_output=model.raw_encoder_output).cpu()
-    embeds2 = model.base_encoder(valid_drugs.to(device), masks2, valid_mols, valid_kgs, valid_cvs, valid_tx_all_cell_lines, raw_encoder_output=model.raw_encoder_output).cpu()
+    embeds1 = model.base_encoder(valid_drugs.to(device), masks1, valid_mols, valid_kgs, valid_cvs, valid_tx_all_cell_lines, raw_encoder_output=model.raw_encoder_output, **other_tabular_mod_data).cpu()
+    embeds2 = model.base_encoder(valid_drugs.to(device), masks2, valid_mols, valid_kgs, valid_cvs, valid_tx_all_cell_lines, raw_encoder_output=model.raw_encoder_output, **other_tabular_mod_data).cpu()
 
     # Get top5 and top1 accuracy
     top5_acc_cosine_real, top20_real_both, top5_real_both, top1_real_both, _, _ = get_inst_dist_topk_accuracy(embeds1, embeds2, 5, 'cosine')  # "real" embeddings for downstream

@@ -5,6 +5,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from ..utils import NUM_NON_TX_MODALITIES
+
 
 class SimCLR_NovelDDI(nn.Module):
     def __init__(self, base_encoder, dim=256, mlp_dim=1024, T=1.0, raw_encoder_output=False, shared_predictor=False):
@@ -115,15 +117,21 @@ class SimCLR_NovelDDI(nn.Module):
         Output:
             loss
         """
-        batch_mols, batch_kg, batch_cv, batch_tx_dict = batch_data
+        if NUM_NON_TX_MODALITIES == 3:
+            batch_mols, batch_kg, batch_cv, batch_tx_dict = batch_data
+            other_tabular_mod_data = {}
+        else:
+            assert NUM_NON_TX_MODALITIES == 4
+            batch_mols, batch_kg, batch_cv, batch_bs, batch_tx_dict = batch_data
+            other_tabular_mod_data = {"bs": batch_bs}
         
         # compute features
         if self.shared_predictor:
-            aug_1 = self.predictor(self.base_encoder(drug_indices, batch_mask_1, batch_mols, batch_kg, batch_cv, batch_tx_dict, raw_encoder_output=self.raw_encoder_output))  # raw encoder output is [batch_size, seq_len, hidden_dim], then select the corresponding modality output for each compound
-            aug_2 = self.predictor(self.base_encoder(drug_indices, batch_mask_2, batch_mols, batch_kg, batch_cv, batch_tx_dict, raw_encoder_output=self.raw_encoder_output))
+            aug_1 = self.predictor(self.base_encoder(drug_indices, batch_mask_1, batch_mols, batch_kg, batch_cv, batch_tx_dict, raw_encoder_output=self.raw_encoder_output, **other_tabular_mod_data))  # raw encoder output is [batch_size, seq_len, hidden_dim], then select the corresponding modality output for each compound
+            aug_2 = self.predictor(self.base_encoder(drug_indices, batch_mask_2, batch_mols, batch_kg, batch_cv, batch_tx_dict, raw_encoder_output=self.raw_encoder_output, **other_tabular_mod_data))
         else:
-            aug_1 = self.predictor_1(self.base_encoder(drug_indices, batch_mask_1, batch_mols, batch_kg, batch_cv, batch_tx_dict, raw_encoder_output=self.raw_encoder_output))  # raw encoder output is [batch_size, seq_len, hidden_dim], then select the corresponding modality output for each compound
-            aug_2 = self.predictor_2(self.base_encoder(drug_indices, batch_mask_2, batch_mols, batch_kg, batch_cv, batch_tx_dict, raw_encoder_output=self.raw_encoder_output))
+            aug_1 = self.predictor_1(self.base_encoder(drug_indices, batch_mask_1, batch_mols, batch_kg, batch_cv, batch_tx_dict, raw_encoder_output=self.raw_encoder_output, **other_tabular_mod_data))  # raw encoder output is [batch_size, seq_len, hidden_dim], then select the corresponding modality output for each compound
+            aug_2 = self.predictor_2(self.base_encoder(drug_indices, batch_mask_2, batch_mols, batch_kg, batch_cv, batch_tx_dict, raw_encoder_output=self.raw_encoder_output, **other_tabular_mod_data))
 
         # TODO: extra neg mol features
         # if batch_extra_mols is not None:
